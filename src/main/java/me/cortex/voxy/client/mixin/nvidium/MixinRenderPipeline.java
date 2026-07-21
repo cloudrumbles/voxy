@@ -20,7 +20,7 @@ public class MixinRenderPipeline {
         var renderer = IVoxyRenderSystemHolder.getNullable();
         if (renderer != null) {
             renderer.renderOpaque(renderer.setupViewport(crm.projection(), crm.modelView(), fogParameters, pass.getTarget().width, pass.getTarget().height, px, py, pz),
-                    ((GlTextureView)pass.getTarget().getDepthTextureView()).glId(), ((GlTextureView)pass.getTarget().getColorTextureView()).glId());
+                    ((GlTextureView)pass.getTarget().getDepthTextureView()).texture().glId(), ((GlTextureView)pass.getTarget().getColorTextureView()).texture().glId());
         }
     }
 }

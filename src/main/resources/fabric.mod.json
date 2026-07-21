@@ -41,6 +41,7 @@
     "minecraft": "${allowed_mc_version}",
     "fabricloader": ">=0.14.22",
     "fabric-api": ">=0.91.1",
+    "java": ">=25",
     "sodium": "${allowed_sodium_versions}"
   },
   "breaks": {

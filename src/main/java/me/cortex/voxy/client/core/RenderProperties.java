@@ -65,7 +65,7 @@ public record RenderProperties(boolean isZero2One, boolean isReverseZ, boolean u
 
     public static RenderProperties getRenderProperties() {
         RenderProperties properties = new RenderProperties(
-                RenderSystem.getDevice().getDeviceInfo().isZZeroToOne(),
+                RenderSystem.getDevice().isZZeroToOne(),
                 useReverseZ(),
                 false);
 
