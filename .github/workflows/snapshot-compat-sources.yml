@@ -20,10 +20,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git clone --depth 1 --branch 19.2/modernized https://github.com/FiniteReality/embeddium.git embeddium
+          git clone --depth 1 --branch 19.2/modernized https://github.com/FiniteReality/embeddium.git embeddium-modernized
+          git clone --depth 1 --branch forge-19.2-final https://github.com/FiniteReality/embeddium.git embeddium-released
           git clone --depth 1 --branch 1.19.2 https://github.com/Asek3/Oculus.git oculus
-          rm -rf embeddium/.git oculus/.git
-          tar -czf compat-sources.tar.gz embeddium oculus
+          rm -rf embeddium-modernized/.git embeddium-released/.git oculus/.git
+          tar -czf compat-sources.tar.gz embeddium-modernized embeddium-released oculus
 
       - name: Upload source snapshot
         uses: actions/upload-artifact@v4
