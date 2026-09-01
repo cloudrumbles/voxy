@@ -43,7 +43,6 @@ sourceSets {
     }
 }
 
-
 version = project.mod_version
 group = project.maven_group
 base {
@@ -89,6 +88,7 @@ repositories {
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com/' }
+    maven { url = 'https://maven.florens.be' }
     maven {
         name = 'Modrinth'
         url = 'https://api.modrinth.com/maven'
@@ -105,6 +105,12 @@ dependencies {
     // used by the functional Voxy baseline. The public 0.3.18.1 release still
     // exposes the older Rubidium layout and is not binary-compatible.
     implementation fg.deobf("org.embeddedt:embeddium-1.19.2:${embeddium_version}")
+
+    // Development-only helper: when -PruntimeSmoke is supplied, automatically
+    // enter a fixture save named "autoload" so CI can exercise the real renderer.
+    if (project.hasProperty('runtimeSmoke')) {
+        runtimeOnly fg.deobf('be.florens:autoload-forge:1.1.3')
+    }
 
     // Minecraft 1.19.2 and the selected Embeddium build use JOML 1.10.5.
     compileOnly 'org.joml:joml:1.10.5'
