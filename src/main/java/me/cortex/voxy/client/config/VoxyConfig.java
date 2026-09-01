@@ -3,12 +3,11 @@ package me.cortex.voxy.client.config;
 import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-
 import me.cortex.voxy.client.core.SSAO;
 import me.cortex.voxy.common.Logger;
+import me.cortex.voxy.commonImpl.ForgePlatform;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.jellysquid.mods.sodium.client.gui.options.storage.OptionStorage;
-import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.FileReader;
 import java.io.IOException;
@@ -35,14 +34,17 @@ public class VoxyConfig implements OptionStorage<VoxyConfig> {
     public float subDivisionSize = 64;
     public boolean renderVanillaFog = true;
     public boolean dontUseSodiumBuilderThreads = false;
-
     public String ssaoMode;
 
     public SSAO.SSAOMode getSSAOMode() {
-        if (this.ssaoMode == null) return SSAO.SSAOMode.AUTO;
+        if (this.ssaoMode == null) {
+            return SSAO.SSAOMode.AUTO;
+        }
         try {
             return SSAO.SSAOMode.valueOf(this.ssaoMode.toUpperCase(Locale.ROOT));
-        } catch (Exception e) { return SSAO.SSAOMode.AUTO; }
+        } catch (IllegalArgumentException exception) {
+            return SSAO.SSAOMode.AUTO;
+        }
     }
 
     public void setSSAOMode(SSAO.SSAOMode mode) {
@@ -51,27 +53,27 @@ public class VoxyConfig implements OptionStorage<VoxyConfig> {
 
     private static VoxyConfig loadOrCreate() {
         if (VoxyCommon.isAvailable()) {
-            var path = getConfigPath();
+            Path path = getConfigPath();
             if (Files.exists(path)) {
                 try (FileReader reader = new FileReader(path.toFile())) {
-                    var conf = GSON.fromJson(reader, VoxyConfig.class);
-                    if (conf != null) {
-                        conf.save();
-                        return conf;
-                    } else {
-                        Logger.error("Failed to load voxy config, resetting");
+                    VoxyConfig config = GSON.fromJson(reader, VoxyConfig.class);
+                    if (config != null) {
+                        config.save();
+                        return config;
                     }
-                } catch (IOException e) {
-                    Logger.error("Could not parse config", e);
+                    Logger.error("Failed to load voxy config, resetting");
+                } catch (IOException exception) {
+                    Logger.error("Could not parse config", exception);
                 }
             }
             Logger.info("Config doesnt exist, creating new");
-            var config = new VoxyConfig();
+            VoxyConfig config = new VoxyConfig();
             config.save();
             return config;
         }
+
         LOADED_WHILE_UNAVAILABLE = true;
-        var config = new VoxyConfig();
+        VoxyConfig config = new VoxyConfig();
         config.enabled = false;
         config.enableRendering = false;
         return config;
@@ -92,15 +94,13 @@ public class VoxyConfig implements OptionStorage<VoxyConfig> {
 
         try {
             Files.writeString(getConfigPath(), GSON.toJson(this));
-        } catch (IOException e) {
-            Logger.error("Failed to write config file", e);
+        } catch (IOException exception) {
+            Logger.error("Failed to write config file", exception);
         }
     }
 
     private static Path getConfigPath() {
-        return FabricLoader.getInstance()
-                .getConfigDir()
-                .resolve("voxy-config.json");
+        return ForgePlatform.configDirectory().resolve("voxy-config.json");
     }
 
     @Override
