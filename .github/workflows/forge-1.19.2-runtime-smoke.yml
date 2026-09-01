@@ -55,6 +55,13 @@ jobs:
 
       - name: Validate the installed packaged client
         shell: bash
+        env:
+          # Installed jars carry SRG refmaps. ForgeGradle's userdev runtime uses
+          # official names, so Mixin must translate those references through
+          # the mapping file produced by the isolated client's createSrgToMcp task.
+          JAVA_TOOL_OPTIONS: >-
+            -Dmixin.env.remapRefMap=true
+            -Dmixin.env.refMapRemappingFile=${{ github.workspace }}/build/packaged-smoke-client-project/build/createSrgToMcp/output.srg
         run: bash ci/run-packaged-forge-smoke.sh
 
       - name: Require completed validation contract
