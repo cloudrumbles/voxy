@@ -31,17 +31,20 @@ jobs:
             test -f ci/port.patch.ready
             compgen -G 'ci/port.patch.gz.b64.*' >/dev/null
             cat ci/port.patch.gz.b64.* | base64 --decode | gzip --decompress > ci/port.patch
-            echo '0d59297bc8fe5abf901320ac913cd061705a43b6dce5a606eb26dc8746f94c04  ci/port.patch' | sha256sum --check
+            expected="$(sed -n 's/^sha256=//p' ci/port.patch.ready)"
+            test -n "$expected"
+            echo "$expected  ci/port.patch" | sha256sum --check
             git apply --check --whitespace=fix ci/port.patch
             git apply --index --whitespace=fix ci/port.patch
 
             # The Actions token may update repository contents but GitHub does
-            # not permit it to create or modify workflow files. The equivalent
-            # diagnostic classpath capture already lives in this runner, so keep
-            # the source commit free of the forge CI workflow hunk.
+            # not permit it to create or modify workflow files. Keep source
+            # patches outside workflow scope; workflow edits are committed by
+            # the connected GitHub client before the marker is triggered.
             git restore --source=HEAD --staged --worktree .github/workflows/forge-1.19.2-ci.yml
+            git restore --source=HEAD --staged --worktree .github/workflows/apply-port-patch.yml
 
-            git rm ci/port.patch.b64.* ci/port.patch.gz.b64.* ci/port.patch.ready
+            git rm -f --ignore-unmatch ci/port.patch.b64.* ci/port.patch.gz.b64.* ci/port.patch.ready
             rm ci/port.patch
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -83,6 +86,7 @@ jobs:
           ./gradlew --no-daemon build jarJar 2>&1 | tee ci/build.log
 
       - name: Snapshot exact compile classpath
+        if: always()
         shell: bash
         run: |
           set -o pipefail
