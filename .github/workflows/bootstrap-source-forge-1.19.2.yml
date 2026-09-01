@@ -1,0 +1,179 @@
+name: bootstrap-source-forge-1.19.2
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - .github/workflows/bootstrap-source-forge-1.19.2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out target branch
+        uses: actions/checkout@v4
+        with:
+          ref: forge-1.19.2
+          fetch-depth: 0
+
+      - name: Import Forge source baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$PWD"
+          git clone --depth 1 --branch forge-1.20.1 \
+            https://github.com/guchang233/voxy-forge-1.20.1.git \
+            /tmp/voxy-forge-1.20.1
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            /tmp/voxy-forge-1.20.1/ "$target/"
+
+      - name: Retarget build and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          props_path = Path("gradle.properties")
+          props = props_path.read_text(encoding="utf-8")
+          values = {
+              "minecraft_version": "1.19.2",
+              "forge_version": "43.5.2",
+              "parchment_version": "2022.11.27",
+              "parchment_minecraft_version": "1.19.2",
+              "mod_version": "0.2.18-beta-forge-1.19.2",
+              "archives_base_name": "voxy-forge-1.19.2",
+              "java_version": "17",
+          }
+          for key, value in values.items():
+              pattern = rf"(?m)^{re.escape(key)}=.*$"
+              props = (
+                  re.sub(pattern, f"{key}={value}", props)
+                  if re.search(pattern, props)
+                  else props + f"\n{key}={value}\n"
+              )
+          props = re.sub(r"(?m)^org\.gradle\.java\.installations\.paths=.*\n?", "", props)
+          props_path.write_text(props, encoding="utf-8")
+
+          build_path = Path("build.gradle")
+          build = build_path.read_text(encoding="utf-8")
+          build = build.replace(
+              "minecraft_version_range: '[1.20.1,1.21)'",
+              "minecraft_version_range: '[1.19.2,1.20)'",
+          )
+          build = build.replace(
+              "forge_version_range : '[47,)'",
+              "forge_version_range : '[43,)'",
+          )
+          build = build.replace(
+              "loader_version_range: '[47,)'",
+              "loader_version_range: '[43,)'",
+          )
+
+          dependency_anchor = "    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'\n"
+          if "org.junit.jupiter:junit-jupiter" not in build:
+              build = build.replace(
+                  dependency_anchor,
+                  dependency_anchor
+                  + "    testImplementation platform('org.junit:junit-bom:5.10.3')\n"
+                  + "    testImplementation 'org.junit.jupiter:junit-jupiter'\n"
+                  + "    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'\n",
+              )
+
+          if "useJUnitPlatform()" not in build:
+              build = build.replace(
+                  "java {\n",
+                  "tasks.withType(Test).configureEach {\n"
+                  "    useJUnitPlatform()\n"
+                  "    maxHeapSize = '2G'\n"
+                  "}\n\n"
+                  "java {\n",
+                  1,
+              )
+          build_path.write_text(build, encoding="utf-8")
+
+          Path("src/main/resources/pack.mcmeta").write_text(
+              '{\n'
+              '  "pack": {\n'
+              '    "description": "Voxy resources",\n'
+              '    "pack_format": 9\n'
+              '  }\n'
+              '}\n',
+              encoding="utf-8",
+          )
+
+          mods_path = Path("src/main/resources/META-INF/mods.toml")
+          mods = mods_path.read_text(encoding="utf-8").replace(
+              "Ported to Forge 1.20.1 (third-party mod integrations disabled).",
+              "Backported to Forge 1.19.2 with parity tests for stable core behaviour.",
+          )
+          mods_path.write_text(mods, encoding="utf-8")
+          PY
+
+      - name: Correct Java 17 bit operations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > src/main/java/me/cortex/voxy/common/util/IntBitOps.java <<'JAVA'
+          package me.cortex.voxy.common.util;
+
+          /** Java 17 equivalents for the JDK bit-compress and bit-expand operations. */
+          public final class IntBitOps {
+              private IntBitOps() {}
+
+              public static int compress(int value, int mask) {
+                  int result = 0;
+                  int outputBit = 1;
+                  for (int remaining = mask; remaining != 0; remaining &= remaining - 1) {
+                      int selectedBit = remaining & -remaining;
+                      if ((value & selectedBit) != 0) {
+                          result |= outputBit;
+                      }
+                      outputBit <<= 1;
+                  }
+                  return result;
+              }
+
+              public static int expand(int value, int mask) {
+                  int result = 0;
+                  int inputBit = 1;
+                  for (int remaining = mask; remaining != 0; remaining &= remaining - 1) {
+                      int selectedBit = remaining & -remaining;
+                      if ((value & inputBit) != 0) {
+                          result |= selectedBit;
+                      }
+                      inputBit <<= 1;
+                  }
+                  return result;
+              }
+          }
+          JAVA
+
+          cat > PORTING.md <<'DOC'
+          # Voxy Forge 1.19.2 port contract
+
+          This branch targets Minecraft 1.19.2, Forge 43.5.2, and Java 17.
+          Loader-specific implementation details may change, while persistent
+          world formats, coordinate packing, voxel/mip layouts, configuration
+          defaults, and lifecycle behaviour remain compatible with upstream.
+
+          The branch is source-only and preserves the upstream licence.
+          DOC
+
+      - name: Commit imported source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "port: import Forge baseline for 1.19.2"
+          git push origin HEAD:forge-1.19.2
