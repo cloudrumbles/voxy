@@ -129,7 +129,9 @@ tasks.register('prepareSmokeMods', Sync) {
     from configurations.smokeMods
 }
 
-tasks.named('runClient').configure {
+// ForgeGradle registers runClient after project evaluation. A live matching
+// collection configures it when it appears instead of failing eagerly.
+tasks.matching { it.name == 'runClient' }.configureEach {
     dependsOn tasks.named('prepareSmokeMods')
 }
 
