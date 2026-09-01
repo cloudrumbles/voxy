@@ -25,20 +25,34 @@ jobs:
       - name: Apply queued port patch
         shell: bash
         run: |
-          set -euo pipefail
-          test -f ci/port.patch.ready
-          compgen -G 'ci/port.patch.gz.b64.*' >/dev/null
-          cat ci/port.patch.gz.b64.* | base64 --decode | gzip --decompress > ci/port.patch
-          echo '0d59297bc8fe5abf901320ac913cd061705a43b6dce5a606eb26dc8746f94c04  ci/port.patch' | sha256sum --check
-          git apply --index --whitespace=fix ci/port.patch
-          git rm ci/port.patch.b64.* ci/port.patch.gz.b64.* ci/port.patch.ready
-          rm ci/port.patch
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -m 'port: apply compiler-fix round'
-          git push
           mkdir -p ci
-          git archive --format=zip --output=ci/patched-source.zip HEAD
+          {
+            set -euxo pipefail
+            test -f ci/port.patch.ready
+            compgen -G 'ci/port.patch.gz.b64.*' >/dev/null
+            cat ci/port.patch.gz.b64.* | base64 --decode | gzip --decompress > ci/port.patch
+            echo '0d59297bc8fe5abf901320ac913cd061705a43b6dce5a606eb26dc8746f94c04  ci/port.patch' | sha256sum --check
+            git apply --check --whitespace=fix ci/port.patch
+            git apply --index --whitespace=fix ci/port.patch
+            git rm ci/port.patch.b64.* ci/port.patch.gz.b64.* ci/port.patch.ready
+            rm ci/port.patch
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'port: apply compiler-fix round'
+
+            pushed=false
+            for attempt in 1 2 3 4; do
+              if git push origin HEAD:forge-1.19.2; then
+                pushed=true
+                break
+              fi
+              git fetch origin forge-1.19.2
+              git rebase origin/forge-1.19.2
+            done
+            test "$pushed" = true
+
+            git archive --format=zip --output=ci/patched-source.zip HEAD
+          } 2>&1 | tee ci/apply.log
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -62,7 +76,6 @@ jobs:
           ./gradlew --no-daemon build jarJar 2>&1 | tee ci/build.log
 
       - name: Snapshot exact compile classpath
-        if: always()
         shell: bash
         run: |
           set -o pipefail
