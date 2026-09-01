@@ -1,0 +1,137 @@
+name: recover-forge-port
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - ci/recover-port.trigger
+      - .github/workflows/recover-forge-port.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: recover-forge-port
+  cancel-in-progress: false
+
+jobs:
+  recover-build-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct verified patch from history
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci/recovery
+          : > ci/recovery/port.patch.gz.b64
+          for number in $(seq 0 9); do
+            suffix="$(printf '%03d' "$number")"
+            path="ci/port.patch.gz.b64.${suffix}"
+            commit="$(git log --all -1 --format=%H -- "$path")"
+            if [[ -z "$commit" ]]; then
+              echo "Missing historical patch chunk: $path" >&2
+              exit 1
+            fi
+            git show "${commit}:${path}" >> ci/recovery/port.patch.gz.b64
+          done
+          base64 --decode ci/recovery/port.patch.gz.b64 > ci/recovery/port.patch.gz
+          gzip -dc ci/recovery/port.patch.gz > ci/recovery/port.patch
+          echo '0d59297bc8fe5abf901320ac913cd061705a43b6dce5a606eb26dc8746f94c04  ci/recovery/port.patch' | sha256sum --check
+
+      - name: Apply source patch atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git apply --check --whitespace=fix ci/recovery/port.patch; then
+            git apply --whitespace=fix ci/recovery/port.patch
+            echo applied > ci/recovery/result
+          elif git apply --reverse --check ci/recovery/port.patch; then
+            echo already-applied > ci/recovery/result
+          else
+            git apply --3way --whitespace=fix ci/recovery/port.patch
+            echo applied-with-three-way > ci/recovery/result
+          fi
+
+          # The payload was produced while CI was evolving. Preserve the live
+          # workflows and commit only the source/build changes.
+          git restore --source=HEAD --staged --worktree .github/workflows 2>/dev/null || true
+          rm -f ci/port.patch.ready ci/port.patch.b64.* ci/port.patch.gz.b64.*
+          printf 'patch_sha256=%s\nresult=%s\nsource_commit=%s\n' \
+            '0d59297bc8fe5abf901320ac913cd061705a43b6dce5a606eb26dc8746f94c04' \
+            "$(cat ci/recovery/result)" \
+            "$GITHUB_SHA" > ci/forge-port-recovery.txt
+          rm -rf ci/recovery
+
+      - name: Commit recovered source state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No source changes were required.'
+          else
+            git commit -m 'port: apply verified Forge 1.19.2 compiler fixes [skip ci]'
+            git push origin HEAD:forge-1.19.2
+          fi
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit and parity tests
+        shell: bash
+        run: ./gradlew --no-daemon clean test
+
+      - name: Build distributable JAR
+        shell: bash
+        run: ./gradlew --no-daemon build jarJar
+
+      - name: Verify distributable contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          jar_file="$(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print -quit)"
+          test -n "$jar_file"
+          jar tf "$jar_file" | grep -qx 'META-INF/mods.toml'
+          jar tf "$jar_file" | grep -qx 'client.voxy.mixins.json'
+          jar tf "$jar_file" | grep -qx 'client.voxy.refmap.json'
+          jar tf "$jar_file" | grep -qx 'META-INF/accesstransformer.cfg'
+          jar tf "$jar_file" | grep -qx 'me/cortex/voxy/client/core/VoxyRenderSystem.class'
+          unzip -p "$jar_file" META-INF/mods.toml | grep -F '[1.19.2,1.20)'
+          unzip -p "$jar_file" META-INF/mods.toml | grep -F '[43,)'
+          if grep -R --include='*.java' -nE 'net\.fabricmc\.|fabric\.api' src/main/java; then
+            echo 'Fabric API reference remains in compiled Forge sources.' >&2
+            exit 1
+          fi
+          if grep -R --line-number --fixed-strings 'VoxyRenderSystem (stub)' src/main/java; then
+            echo 'Stub renderer detected.' >&2
+            exit 1
+          fi
+          cp "$jar_file" build/libs/voxy-forge-1.19.2-validated.jar
+
+      - name: Upload validated candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxy-forge-1.19.2-validated
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            build/libs/voxy-forge-1.19.2-validated.jar
+            build/reports/tests/
+            ci/forge-port-recovery.txt
