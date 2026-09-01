@@ -1,0 +1,81 @@
+name: apply-port-patch
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - ci/port.patch
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply queued port patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f ci/port.patch
+          git apply --index --whitespace=fix ci/port.patch
+          git rm ci/port.patch
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'port: apply compiler-fix round'
+          git push
+          mkdir -p ci
+          git archive --format=zip --output=ci/patched-source.zip HEAD
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit and parity tests
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon clean test 2>&1 | tee ci/test.log
+
+      - name: Forge build and reobfuscation
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon build jarJar 2>&1 | tee ci/build.log
+
+      - name: Snapshot exact compile classpath
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon copyCompileClasspath 2>&1 | tee ci/classpath.log
+
+      - name: Upload compiler iteration
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-1.19.2-port-iteration-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: error
+          include-hidden-files: true
+          path: |
+            ci/
+            build/compile-classpath/
+            build/reports/tests/
+            build/test-results/
+            build/tmp/compileJava/
+            build/libs/
