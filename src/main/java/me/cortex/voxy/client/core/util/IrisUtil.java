@@ -1,41 +1,77 @@
 package me.cortex.voxy.client.core.util;
 
-import net.minecraftforge.fml.ModList;
+import me.cortex.voxy.client.core.VoxyRenderSystem;
+import me.cortex.voxy.client.core.rendering.Viewport;
+import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+import net.fabricmc.loader.api.FabricLoader;
+import net.irisshaders.iris.Iris;
+import net.irisshaders.iris.api.v0.IrisApi;
+import net.irisshaders.iris.gl.IrisRenderSystem;
+import net.irisshaders.iris.shadows.ShadowRenderer;
 
-/**
- * STUB: 1.20.1 Forge 移植期间的 Iris 兼容层占位实现。
- * 原实现通过 mixin 注入 Iris 26.x 的 IrisRenderingPipeline/CustomUniforms 等内部 API,
- * 1.20.1 上的 Iris (1.6.x) 内部 API 完全不同,且本移植已禁用所有 Iris mixin。
- *
- * TODO: 若需在 1.20.1 上恢复 Iris 兼容,需基于 Iris 1.6.x API 重新实现本类与
- *       client/iris/* (已删除) + client/mixin/iris/* (已删除)。
- */
+import java.io.IOException;
+
 public class IrisUtil {
+    public record CapturedViewportParameters(ChunkRenderMatrices matrices, double x, double y, double z) {
+        public Viewport<?> apply(VoxyRenderSystem vrs) {
+            return vrs.setupViewport(this.matrices, this.x, this.y, this.z);
+        }
+    }
 
-    public static final boolean IRIS_INSTALLED = ModList.get() != null && ModList.get().isLoaded("oculus") || (ModList.get() != null && ModList.get().isLoaded("iris"));
-    public static final boolean SHADER_SUPPORT = false;
+    public static CapturedViewportParameters CAPTURED_VIEWPORT_PARAMETERS;
+
+    public static final boolean IRIS_INSTALLED = FabricLoader.getInstance().isModLoaded("iris");
+    public static final boolean SHADER_SUPPORT = true;//System.getProperty("voxy.enableExperimentalIrisPipeline", "false").equalsIgnoreCase("true");
+
+
+    private static boolean irisShadowActive0() {
+        return ShadowRenderer.ACTIVE;
+    }
 
     public static boolean irisShadowActive() {
-        return false;
+        return IRIS_INSTALLED && irisShadowActive0();
     }
 
     public static void clearIrisSamplers() {
-        // no-op
+        if (IRIS_INSTALLED) clearIrisSamplers0();
+    }
+    public static void reload() {
+        if (IRIS_INSTALLED) reload0();
     }
 
-    public static void reload() {
-        // no-op
+    private static void reload0() {
+        try {
+            if (IrisApi.getInstance().isShaderPackInUse()||IrisApi.getInstance().getConfig().areShadersEnabled()) {//Only reload if there is a shaderpack
+                Iris.reload();
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void clearIrisSamplers0() {
+        for (int i = 0; i < 16; i++) {
+            IrisRenderSystem.bindSamplerToUnit(i, 0);
+        }
+    }
+
+    private static boolean irisShaderPackEnabled0() {
+        return Iris.isPackInUseQuick();
     }
 
     public static boolean irisShaderPackEnabled() {
-        return false;
+        return IRIS_INSTALLED && irisShaderPackEnabled0();
     }
-
+    private static boolean irisShadersEnabledInConfig0() {
+        return !Iris.getCurrentPack().isEmpty();
+    }
     public static boolean irisShadersEnabledInConfig() {
-        return false;
+        return IRIS_INSTALLED && irisShadersEnabledInConfig0();
     }
-
     public static void disableIrisShaders() {
-        // no-op
+        if(IRIS_INSTALLED) disableIrisShaders0();
+    }
+    private static void disableIrisShaders0() {
+        IrisApi.getInstance().getConfig().setShadersEnabledAndApply(false);//Disable shaders
     }
 }

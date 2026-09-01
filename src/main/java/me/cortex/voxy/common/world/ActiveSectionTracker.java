@@ -12,7 +12,7 @@ import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.StampedLock;
 
-public final class ActiveSectionTracker {
+public class ActiveSectionTracker {
 
     //Deserialize into the supplied section, returns true on success, false on failure
     public interface SectionLoader {int load(WorldSection section);}
@@ -179,21 +179,10 @@ public final class ActiveSectionTracker {
         } else {
             //TODO: mark the time the loading started in nanos, then here if it has been a while, spin lock, else jump back to the executing service and do work
             VarHandle.fullFence();
-            // 1.20.1 移植:原为无超时自旋等待 loader 线程填充 section,
-            // 若 loader 线程异常会导致永久阻塞。改为带超时(默认 10s)等待,
-            // 超时后返回 null 并记录警告,避免 render 线程永久卡死。
-            long __waitStart = System.nanoTime();
-            long __timeoutNanos = 10_000_000_000L; // 10s
             while ((section = holder.obj) == null) {
                 VarHandle.fullFence();
                 Thread.onSpinWait();
                 Thread.yield();
-                if ((System.nanoTime() - __waitStart) > __timeoutNanos) {
-                    Logger.warn("ActiveSectionTracker.acquire timed out waiting for section " + key + " after 10s, returning null");
-                    // 回滚 PRE_ACQUIRE_COUNT 避免计数泄漏
-                    VolatileHolder.PRE_ACQUIRE_COUNT.getAndAdd(holder, -1);
-                    return null;
-                }
             }
 
             //Try to acquire a pre lock
@@ -219,29 +208,15 @@ public final class ActiveSectionTracker {
         if (this.engine != null) this.engine.lastActiveTime = System.currentTimeMillis();
         if (section.shouldSave()&&this.engine!=null) {
             if (section.tryAcquire()) {
-                VarHandle.loadLoadFence();
                 if (section.shouldSave()) {//If we should try enqueue
-                    if (!this.engine.saveSection(section, false, true)) {
+                    if (!this.engine.saveSection(section, true, true)) {
                         //we didnt enqueue the section in the save queue so we must unload it manually
-                        Logger.info("section raced to into save queue, we lost");
-                        section.release(true, hints);//We need to try unload cause else we may loose state
-                    } else {
-                        //section is queued, and we gave it the acquired section, so we can just return
-                        return;//We just return
+                        section.release(false, hints);
                     }
                 } else {
-                    Logger.warn("section raced to save queue, we lost");
-                    section.release(true, hints);//Unload cause we need to retry the whole thing again
-                }
-            } else {
-                if (section.shouldSave()) {
-                    //This is bad
-                    Logger.error("failed to acquire section, but we need to save, this is really bad");
-                } else {
-                    Logger.info("raced section");
+                    section.release(false, hints);//Special release
                 }
             }
-            return;//If we reach here, we need to just return, unload pipeline will be taken care of elsewhere
         }
 
         if (section.getRefCount() != 0) {
@@ -252,10 +227,6 @@ public final class ActiveSectionTracker {
         WorldSection sec = null;
         final var lock = this.locks[index];
         long stamp = lock.writeLock();
-        if (section.getRefCount() != 0) {
-            lock.unlockWrite(stamp);
-            return;
-        }
         boolean shouldRetryExit = false;
         {
             VarHandle.loadLoadFence();
@@ -264,14 +235,11 @@ public final class ActiveSectionTracker {
                     if (!this.engine.saveSection(section, true, true)) {//not allowed to block as we are in a lock
                         //We didnt enqueue the save here, so we must unload
                         // but unload in a recursive
-                        //VarHandle.fullFence();
-                        //shouldRetryExit |= section.getRefCount()!=1;//if we arnt the only ref
-                        //VarHandle.fullFence();
-                        //shouldRetryExit |= section.isDirty;//or if the section is now dirty, note this must go AFTER the ref check, since you can only mark live sections as dirty
-
-                        shouldRetryExit |= true;//Always force retry when/if we hit this case
-                        section.release(false, hints);//Special, we cannot unload here else we deadlock
-                        //we can do a no-unload since we are guarenteed to retry
+                        VarHandle.fullFence();
+                        shouldRetryExit |= section.getRefCount()!=1;//if we arnt the only ref
+                        VarHandle.fullFence();
+                        shouldRetryExit |= section.isDirty;//or if the section is now dirty, note this must go AFTER the ref check, since you can only mark live sections as dirty
+                        section.release(false, hints);//Special
                     }
 
 

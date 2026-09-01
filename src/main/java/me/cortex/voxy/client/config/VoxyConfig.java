@@ -3,12 +3,12 @@ package me.cortex.voxy.client.config;
 import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonParseException;
+
 import me.cortex.voxy.client.core.SSAO;
 import me.cortex.voxy.common.Logger;
-import me.cortex.voxy.common.util.cpu.CpuLayout;
 import me.cortex.voxy.commonImpl.VoxyCommon;
-import net.minecraftforge.fml.loading.FMLPaths;
+import me.jellysquid.mods.sodium.client.gui.options.storage.OptionStorage;
+import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.FileReader;
 import java.io.IOException;
@@ -17,36 +17,25 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Locale;
 
-public class VoxyConfig {
+public class VoxyConfig implements OptionStorage<VoxyConfig> {
     private static final Gson GSON = new GsonBuilder()
             .setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
             .setPrettyPrinting()
             .excludeFieldsWithModifiers(Modifier.PRIVATE)
             .create();
 
+    private static boolean LOADED_WHILE_UNAVAILABLE;
     public static VoxyConfig CONFIG = loadOrCreate();
-
-    /**
-     * 在 VoxyCommon.setInstanceFactory 调用后重新加载配置。
-     *
-     * VoxyConfig 的静态初始化 (loadOrCreate) 可能在 setInstanceFactory 之前执行
-     * (例如被 Mixin 类首次引用),此时 VoxyCommon.isAvailable() 返回 false,
-     * 导致配置不写入磁盘且 enabled/enableRendering 被强制设为 false。
-     *
-     * 此方法在 factory 注册完成后调用,确保配置从磁盘正确加载或创建。
-     */
-    public static void reload() {
-        CONFIG = loadOrCreate();
-    }
 
     public boolean enabled = true;
     public boolean enableRendering = true;
     public boolean ingestEnabled = true;
-    public float sectionRenderDistance = 16;
-    public int serviceThreads = (int) Math.max(CpuLayout.getCoreCount()/1.5, 1);
+    public int sectionRenderDistance = 16;
+    public int serviceThreads = (int) Math.max(Runtime.getRuntime().availableProcessors() * 2 / 1.5, 1);
     public float subDivisionSize = 64;
-    public boolean useEnvironmentalFog = true;
+    public boolean renderVanillaFog = true;
     public boolean dontUseSodiumBuilderThreads = false;
+
     public String ssaoMode;
 
     public SSAO.SSAOMode getSSAOMode() {
@@ -59,7 +48,6 @@ public class VoxyConfig {
     public void setSSAOMode(SSAO.SSAOMode mode) {
         this.ssaoMode = mode.name().toLowerCase(Locale.ROOT);
     }
-
 
     private static VoxyConfig loadOrCreate() {
         if (VoxyCommon.isAvailable()) {
@@ -74,22 +62,25 @@ public class VoxyConfig {
                         Logger.error("Failed to load voxy config, resetting");
                     }
                 } catch (IOException e) {
-                    Logger.error("Could not load config", e);
-                } catch (JsonParseException e) {
                     Logger.error("Could not parse config", e);
                 }
-                Logger.info("Error during config loading, creating new");
-            } else {
-                Logger.info("Config file doesnt exist, creating new");
             }
+            Logger.info("Config doesnt exist, creating new");
             var config = new VoxyConfig();
             config.save();
             return config;
-        } else {
-            var config = new VoxyConfig();
-            config.enabled = false;
-            config.enableRendering = false;
-            return config;
+        }
+        LOADED_WHILE_UNAVAILABLE = true;
+        var config = new VoxyConfig();
+        config.enabled = false;
+        config.enableRendering = false;
+        return config;
+    }
+
+    public static void reloadAfterVoxyAvailable() {
+        if (LOADED_WHILE_UNAVAILABLE && VoxyCommon.isAvailable()) {
+            LOADED_WHILE_UNAVAILABLE = false;
+            CONFIG = loadOrCreate();
         }
     }
 
@@ -107,8 +98,14 @@ public class VoxyConfig {
     }
 
     private static Path getConfigPath() {
-        return FMLPaths.CONFIGDIR.get()
+        return FabricLoader.getInstance()
+                .getConfigDir()
                 .resolve("voxy-config.json");
+    }
+
+    @Override
+    public VoxyConfig getData() {
+        return this;
     }
 
     public boolean isRenderingEnabled() {

@@ -62,8 +62,7 @@ public class Logger {
         if (instance != null) {
             instance.executeIfPossible(() -> {
                 var player = Minecraft.getInstance().player;
-                // 1.20.1 中 Gui 没有 handleSystemMessage 方法,改用 ChatComponent.addMessage
-                if (player != null) instance.gui.getChat().addMessage(Component.literal(msg));
+                if (player != null) instance.getChatListener().handleSystemMessage(Component.literal(msg), true);
             });
         }
     }

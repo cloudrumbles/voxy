@@ -13,21 +13,18 @@ import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldUpdater;
 import net.minecraft.core.Holder;
-import net.minecraft.core.IdMap;
-import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
-import net.minecraft.world.level.block.Block;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.*;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.chunk.PalettedContainerRO;
 import net.minecraft.world.level.chunk.storage.RegionFileVersion;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
@@ -49,6 +46,46 @@ import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipFile;
+import org.lwjgl.system.MemoryUtil;
+
+import com.mojang.serialization.Codec;
+
+import me.cortex.voxy.common.Logger;
+import me.cortex.voxy.common.thread.Service;
+import me.cortex.voxy.common.thread.ServiceManager;
+import me.cortex.voxy.common.util.MemoryBuffer;
+import me.cortex.voxy.common.util.Pair;
+import me.cortex.voxy.common.util.UnsafeUtil;
+import me.cortex.voxy.common.voxelization.VoxelizedSection;
+import me.cortex.voxy.common.voxelization.WorldConversionFactory;
+import me.cortex.voxy.common.world.WorldEngine;
+import me.cortex.voxy.common.world.WorldUpdater;
+import me.cortex.voxy.commonImpl.importers.IDataImporter.ICompletionCallback;
+import me.cortex.voxy.commonImpl.importers.IDataImporter.IUpdateCallback;
+import net.minecraft.core.Holder;
+import net.minecraft.core.IdMap;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.core.Registry;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtIo;
+import net.minecraft.nbt.NbtOps;
+import net.minecraft.nbt.Tag;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.biome.Biome;
+import net.minecraft.world.level.biome.Biomes;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.ChunkStatus;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.chunk.PalettedContainerRO;
+import net.minecraft.world.level.chunk.PalettedContainerRO.PackedData;
+import net.minecraft.world.level.chunk.storage.RegionFileVersion;
+
 public class WorldImporter implements IDataImporter {
     private final WorldEngine world;
     private final PalettedContainerRO<Holder<Biome>> defaultBiomeProvider;
@@ -67,11 +104,9 @@ public class WorldImporter implements IDataImporter {
         this.world = worldEngine;
         this.service = sm.createService(()->new Pair<>(()->this.jobQueue.poll().run(), ()->{}), 3, "World importer", runChecker);
 
-        // 1.20.1: RegistryAccess.registryOrThrow 返回 Registry<T> (不是 RegistryLookup)
-        Registry<Biome> biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registries.BIOME);
-        // 1.20.1: Registry.getHolder(ResourceKey) 返回 Optional<Holder.Reference<T>>
+        var biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registries.BIOME);
         var defaultBiome = biomeRegistry.getHolder(Biomes.PLAINS).orElseThrow();
-        this.defaultBiomeProvider = new PalettedContainerRO<Holder<Biome>>() {
+        this.defaultBiomeProvider = new PalettedContainerRO<>() {
             @Override
             public Holder<Biome> get(int x, int y, int z) {
                 return defaultBiome;
@@ -79,7 +114,7 @@ public class WorldImporter implements IDataImporter {
 
             @Override
             public void getAll(Consumer<Holder<Biome>> action) {
-                action.accept(defaultBiome);
+
             }
 
             @Override
@@ -94,12 +129,12 @@ public class WorldImporter implements IDataImporter {
 
             @Override
             public boolean maybeHas(Predicate<Holder<Biome>> predicate) {
-                return predicate.test(defaultBiome);
+                return false;
             }
 
             @Override
             public void count(PalettedContainer.CountConsumer<Holder<Biome>> counter) {
-                counter.accept(defaultBiome, 1);
+
             }
 
             @Override
@@ -108,25 +143,13 @@ public class WorldImporter implements IDataImporter {
             }
 
             @Override
-            public PalettedContainerRO.PackedData<Holder<Biome>> pack(IdMap<Holder<Biome>> idMap, PalettedContainer.Strategy strategy) {
+            public PackedData<Holder<Biome>> pack(IdMap<Holder<Biome>> idMap, PalettedContainer.Strategy strategy) {
                 return null;
             }
         };
 
-        // 1.20.1: PalettedContainerFactory 不存在,直接用 PalettedContainer.codecRW/codecRO 静态方法
-        IdMap<Holder<Biome>> biomeIdMap = biomeRegistry.asHolderIdMap();
-        this.biomeCodec = PalettedContainer.codecRO(
-                biomeIdMap,
-                biomeRegistry.holderByNameCodec(),
-                PalettedContainer.Strategy.SECTION_BIOMES,
-                defaultBiome
-        );
-        this.blockStateCodec = PalettedContainer.codecRW(
-                Block.BLOCK_STATE_REGISTRY,
-                BlockState.CODEC,
-                PalettedContainer.Strategy.SECTION_STATES,
-                Blocks.AIR.defaultBlockState()
-        );
+        this.biomeCodec = PalettedContainer.codecRO(biomeRegistry.asHolderIdMap(), biomeRegistry.holderByNameCodec(), PalettedContainer.Strategy.SECTION_BIOMES, biomeRegistry.getHolderOrThrow(Biomes.PLAINS));
+        this.blockStateCodec = PalettedContainer.codecRW(Block.BLOCK_STATE_REGISTRY, BlockState.CODEC, PalettedContainer.Strategy.SECTION_STATES, Blocks.AIR.defaultBlockState());;
     }
 
 
@@ -200,7 +223,6 @@ public class WorldImporter implements IDataImporter {
     public void importZippedRegionDirectoryAsync(File zip, String innerDirectory) {
         try {
             innerDirectory = innerDirectory.replace("\\\\", "\\").replace("\\", "/");
-            // 1.20.1 commons-compress 1.21 没有 ZipFile.builder() API,直接用构造器
             var file = new ZipFile(zip);
             ArrayList<ZipArchiveEntry> regions = new ArrayList<>();
             for (var e = file.getEntries(); e.hasMoreElements();) {
@@ -240,6 +262,7 @@ public class WorldImporter implements IDataImporter {
                 }
                 buf.free();
             });
+            file.close();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -451,22 +474,22 @@ public class WorldImporter implements IDataImporter {
         }
 
         //Dont process non full chunk sections
-        var status = ChunkStatus.byName(chunk.contains("Status") ? chunk.getString("Status") : null);
+        var status = ChunkStatus.byName(chunk.getString("Status"));
         if (status != ChunkStatus.FULL && status != ChunkStatus.EMPTY) {//We also import empty since they are from data upgrade
             this.totalChunks.decrementAndGet();
             return;
         }
 
         try {
-            int x = chunk.contains("xPos") ? chunk.getInt("xPos") : Integer.MIN_VALUE;
-            int z = chunk.contains("zPos") ? chunk.getInt("zPos") : Integer.MIN_VALUE;
+            int x = chunk.getInt("xPos");
+            int z = chunk.getInt("zPos");
             if (x>>5 != regionX || z>>5 != regionZ) {
                 Logger.error("Chunk position is not located in correct region, expected: (" + regionX + ", " + regionZ+"), got: " + "(" + (x>>5) + ", " + (z>>5)+"), importing anyway");
             }
 
             for (var sectionE : chunk.getList("sections", Tag.TAG_COMPOUND)) {
                 var section = (CompoundTag) sectionE;
-                int y = section.contains("Y") ? section.getInt("Y") : Integer.MIN_VALUE;
+                int y = section.getInt("Y");
                 this.importSectionNBT(x, y, z, section);
             }
         } catch (Exception e) {
@@ -500,14 +523,12 @@ public class WorldImporter implements IDataImporter {
             skyLight = null;
         }
 
-        // 1.20.1: getCompound 返回 CompoundTag(非 Optional),resultOrPartial 返回 Optional<T>
         var blockStatesRes = blockStateCodec.parse(NbtOps.INSTANCE, section.getCompound("block_states"));
-        var blockStatesOpt = blockStatesRes.resultOrPartial(msg -> {});
-        if (blockStatesOpt.isEmpty()) {
+        blockStatesRes.get().ifRight(partial -> {
             //TODO: if its only partial, it means should try to upgrade the nbt format with datafixerupper probably
             return;
-        }
-        var blockStates = blockStatesOpt.get();
+        });
+        var blockStates = blockStatesRes.getOrThrow(false, Logger::error);
         var biomes = this.defaultBiomeProvider;
         var optBiomes = section.getCompound("biomes");
         if (!optBiomes.isEmpty()) {

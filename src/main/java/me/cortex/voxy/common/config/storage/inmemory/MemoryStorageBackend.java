@@ -11,6 +11,7 @@ import me.cortex.voxy.common.config.storage.StorageConfig;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.world.WorldEngine;
 import net.minecraft.world.level.levelgen.RandomSupport;
+import org.apache.commons.lang3.stream.Streams;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
@@ -124,7 +125,6 @@ public class MemoryStorageBackend extends StorageBackend {
 
     @Override
     public void close() {
-        // 1.20.1 commons-lang3 的 Streams.of(T[]) 在新版本中已移除,改用 Arrays.stream
         Arrays.stream(this.maps).map(Long2ObjectMap::values).flatMap(ObjectCollection::stream).forEach(MemoryBuffer::free);
         this.idMappings.values().forEach(MemoryUtil::memFree);
     }
