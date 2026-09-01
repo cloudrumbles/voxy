@@ -1,0 +1,91 @@
+name: cleanup-forge-port-staging
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - ci/cleanup-forge-port-staging.ready
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cleanup-forge-port-staging
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - name: Wait for validated release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://github.com/cloudrumbles/voxy/releases/download/forge-1.19.2-0.2.14-alpha-forge.1/voxy-forge-1.19.2-0.2.14-alpha-forge.1.jar'
+          ready=false
+          for _ in $(seq 1 600); do
+            if curl --fail --location --silent --show-error --range 0-0 "$url" -o /dev/null; then
+              ready=true
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = true
+
+      - name: Check out latest branch
+        uses: actions/checkout@v4
+        with:
+          ref: forge-1.19.2
+          fetch-depth: 0
+
+      - name: Remove one-shot migration and publication machinery
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin forge-1.19.2
+          git reset --hard origin/forge-1.19.2
+          rm -f \
+            .github/workflows/apply-runtime-smoke-20260901.yml \
+            .github/workflows/recover-runtime-smoke-20260901.yml \
+            .github/workflows/apply-forge-smoke-v2.yml \
+            .github/workflows/recover-forge-smoke-v2.yml \
+            .github/workflows/validate-release-forge-1.19.2.yml \
+            .github/workflows/validate-release-forge-1.19.2-v2.yml \
+            .github/workflows/validate-release-forge-1.19.2-v3.yml \
+            .github/workflows/capture-forge-release-failure.yml \
+            .github/workflows/cleanup-forge-port-staging.yml \
+            ci/apply-runtime-smoke-20260901.py \
+            ci/apply-runtime-smoke-20260901.ready \
+            ci/recover-runtime-smoke-20260901.ready \
+            ci/run-forge-smoke-v2.sh \
+            ci/apply-forge-smoke-v2.ready \
+            ci/recover-forge-smoke-v2.ready \
+            ci/validate-release-forge-1.19.2.ready \
+            ci/validate-release-forge-1.19.2-v2.ready \
+            ci/validate-release-forge-1.19.2-v3.ready \
+            ci/validate-release-latest-failure.log \
+            ci/cleanup-forge-port-staging.ready
+
+      - name: Commit clean validated branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m 'ci: remove completed Forge port staging [skip ci]'
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:forge-1.19.2; then
+              exit 0
+            fi
+            git fetch origin forge-1.19.2
+            git rebase origin/forge-1.19.2
+            sleep $((attempt * 2))
+          done
+          exit 1
