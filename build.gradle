@@ -71,12 +71,24 @@ repositories {
     maven { url = 'https://mirrors.cloud.tencent.com/maven/' }
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net/' }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
     // Parchment mappings 仓库
     maven { url = 'https://maven.parchmentmc.org/' }
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+
+    // Voxy hooks directly into Embeddium's 1.19.2 renderer implementation.
+    implementation fg.deobf('maven.modrinth:sk9rgfiA:AYqEbec0')
+
+    // Embeddium jar-jars JOML at runtime, but Modrinth Maven does not expose
+    // transitive dependencies to the compiler. Keep the same version here.
+    compileOnly 'org.joml:joml:1.10.5'
 
     // 仅编译期依赖,运行期需要用户自己装 Forge 版的 Sodium/Iris (Rubidium/Embeddium + Oculus)
     // 由于这些 mod 的 1.20.1 内部 API 与源版本完全不同,本移植禁用了所有对它们的直接 mixin 集成
@@ -164,6 +176,7 @@ tasks.withType(JavaCompile).configureEach {
     it.options.encoding = 'UTF-8'
     it.options.release = Integer.parseInt(project.java_version)
     it.options.deprecation = true
+    it.options.compilerArgs += ['-Xmaxerrs', '2000']
 }
 
 // ForgeGradle 6 默认禁用 jarJar 任务,需要显式启用以打包内嵌依赖
