@@ -5,12 +5,22 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 REPORT_DIR="$ROOT_DIR/ci/packaged-runtime-smoke"
-PROJECT_DIR="$ROOT_DIR/build/packaged-smoke-project"
+CLIENT_PROJECT_DIR="$ROOT_DIR/build/packaged-smoke-client-project"
+SERVER_PROJECT_DIR="$ROOT_DIR/build/packaged-smoke-server-project"
 CLIENT_RUN_DIR="$ROOT_DIR/run-packaged-client"
 SERVER_RUN_DIR="$ROOT_DIR/run-packaged-server"
 
-rm -rf "$REPORT_DIR" "$PROJECT_DIR" "$CLIENT_RUN_DIR" "$SERVER_RUN_DIR"
-mkdir -p "$REPORT_DIR" "$PROJECT_DIR" "$CLIENT_RUN_DIR"
+rm -rf \
+    "$REPORT_DIR" \
+    "$CLIENT_PROJECT_DIR" \
+    "$SERVER_PROJECT_DIR" \
+    "$CLIENT_RUN_DIR" \
+    "$SERVER_RUN_DIR"
+mkdir -p \
+    "$REPORT_DIR" \
+    "$CLIENT_PROJECT_DIR/libs" \
+    "$SERVER_PROJECT_DIR" \
+    "$CLIENT_RUN_DIR"
 
 mapfile -t voxy_jars < <(find "$ROOT_DIR/build/libs" -maxdepth 1 -type f -name '*-all.jar' -print | sort)
 if [[ "${#voxy_jars[@]}" -ne 1 ]]; then
@@ -50,7 +60,13 @@ grep -Eq 'modId[[:space:]]*=[[:space:]]*"voxy"' "$REPORT_DIR/packaged-mods.toml"
 grep -Eq 'displayTest[[:space:]]*=[[:space:]]*"IGNORE_SERVER_VERSION"' "$REPORT_DIR/packaged-mods.toml"
 sha256sum "$VOXY_JAR" > "$REPORT_DIR/voxy-jar.sha256"
 
-cat > "$PROJECT_DIR/settings.gradle" <<'GRADLE'
+# A ForgeGradle userdev client uses named mappings, while installed mod jars
+# use production names. Feed the exact packaged jar through fg.deobf via a
+# flatDir repository; this tests the packaged artifact rather than the source
+# set while adapting it to the userdev launcher's namespace.
+cp "$VOXY_JAR" "$CLIENT_PROJECT_DIR/libs/voxy-smoke-0.2.14.jar"
+
+cat > "$CLIENT_PROJECT_DIR/settings.gradle" <<'GRADLE'
 pluginManagement {
     repositories {
         gradlePluginPortal()
@@ -58,10 +74,10 @@ pluginManagement {
         mavenCentral()
     }
 }
-rootProject.name = 'voxy-packaged-smoke'
+rootProject.name = 'voxy-packaged-client-smoke'
 GRADLE
 
-cat > "$PROJECT_DIR/build.gradle" <<'GRADLE'
+cat > "$CLIENT_PROJECT_DIR/build.gradle" <<'GRADLE'
 buildscript {
     repositories {
         mavenLocal()
@@ -81,8 +97,6 @@ group = 'me.cortex.voxy.smoke'
 
 def smokePhase = providers.gradleProperty('smokePhase').orElse('title').get()
 def smokeRunDir = file(providers.gradleProperty('smokeRunDir').orElse('run-client').get())
-def serverRunDir = file(providers.gradleProperty('serverRunDir').orElse('run-server').get())
-def voxyJar = file(providers.gradleProperty('voxyJar').orElse('missing-voxy.jar').get())
 def isWorldPhase = smokePhase.startsWith('world-')
 
 minecraft {
@@ -97,6 +111,74 @@ minecraft {
                 args '--server', '127.0.0.1', '--port', '25565'
             }
         }
+    }
+}
+
+repositories {
+    flatDir { dirs 'libs' }
+    mavenLocal()
+    maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net/' }
+    maven { url = 'https://maven.blamejared.com/' }
+}
+
+dependencies {
+    minecraft 'net.minecraftforge:forge:1.19.2-43.5.2'
+    implementation fg.deobf('local.voxy:voxy-smoke:0.2.14')
+    implementation(fg.deobf('org.embeddedt:embeddium-1.19.2:0.3.32-beta.90+mc1.19.2')) {
+        transitive = false
+    }
+}
+
+// A source-less ForgeGradle project still advertises its default source-set
+// coordinates. SecureJar requires those paths to exist at JVM launch.
+tasks.matching { it.name == 'runClient' }.configureEach {
+    doFirst {
+        new File(project.buildDir, 'resources/main').mkdirs()
+        new File(project.buildDir, 'classes/java/main').mkdirs()
+    }
+}
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
+}
+GRADLE
+
+cat > "$SERVER_PROJECT_DIR/settings.gradle" <<'GRADLE'
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.minecraftforge.net/' }
+        mavenCentral()
+    }
+}
+rootProject.name = 'voxy-clean-server-smoke'
+GRADLE
+
+cat > "$SERVER_PROJECT_DIR/build.gradle" <<'GRADLE'
+buildscript {
+    repositories {
+        mavenLocal()
+        maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
+        mavenCentral()
+        maven { url = 'https://maven.minecraftforge.net/' }
+    }
+    dependencies {
+        classpath 'net.minecraftforge.gradle:ForgeGradle:6.0.54'
+    }
+}
+
+apply plugin: 'net.minecraftforge.gradle'
+
+version = '1.0.0'
+group = 'me.cortex.voxy.smoke'
+
+def serverRunDir = file(providers.gradleProperty('serverRunDir').orElse('run-server').get())
+
+minecraft {
+    mappings channel: 'official', version: '1.19.2'
+    runs {
         server {
             workingDirectory serverRunDir
             property 'forge.logging.console.level', 'debug'
@@ -109,34 +191,13 @@ repositories {
     maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net/' }
-    maven { url = 'https://maven.blamejared.com/' }
-}
-
-configurations {
-    smokeMods
 }
 
 dependencies {
     minecraft 'net.minecraftforge:forge:1.19.2-43.5.2'
-    smokeMods('org.embeddedt:embeddium-1.19.2:0.3.32-beta.90+mc1.19.2') {
-        transitive = false
-    }
 }
 
-tasks.register('prepareSmokeMods', Sync) {
-    into new File(smokeRunDir, 'mods')
-    from voxyJar
-    from configurations.smokeMods
-}
-
-// ForgeGradle registers run tasks after project evaluation. Configure them
-// lazily, and materialise its source-less default-mod coordinates immediately
-// before the child JVM is spawned; prepareRuns can otherwise remove empty
-// build directories created by the outer shell.
-tasks.matching { it.name == 'runClient' }.configureEach {
-    dependsOn tasks.named('prepareSmokeMods')
-}
-tasks.matching { it.name == 'runClient' || it.name == 'runServer' }.configureEach {
+tasks.matching { it.name == 'runServer' }.configureEach {
     doFirst {
         new File(project.buildDir, 'resources/main').mkdirs()
         new File(project.buildDir, 'classes/java/main').mkdirs()
@@ -213,7 +274,7 @@ start_clean_server() {
     exec 9<> "$SERVER_FIFO"
     server_input_fd_open=true
 
-    setsid --wait "$ROOT_DIR/gradlew" -p "$PROJECT_DIR" --no-daemon \
+    setsid --wait "$ROOT_DIR/gradlew" -p "$SERVER_PROJECT_DIR" --no-daemon \
         --project-cache-dir "$ROOT_DIR/build/packaged-server-project-cache" \
         runServer -PserverRunDir="$SERVER_RUN_DIR" \
         < "$SERVER_FIFO" > "$REPORT_DIR/server.log" 2>&1 &
@@ -311,10 +372,9 @@ run_packaged_client() {
             LIBGL_ALWAYS_SOFTWARE=1 \
             GALLIUM_DRIVER=llvmpipe \
             MESA_GL_VERSION_OVERRIDE=4.6 \
-            "$ROOT_DIR/gradlew" -p "$PROJECT_DIR" --no-daemon \
+            "$ROOT_DIR/gradlew" -p "$CLIENT_PROJECT_DIR" --no-daemon \
                 --project-cache-dir "$ROOT_DIR/build/packaged-client-project-cache" \
                 runClient \
-                -PvoxyJar="$VOXY_JAR" \
                 -PsmokeRunDir="$CLIENT_RUN_DIR" \
                 -PsmokePhase="$phase" \
                 > "$REPORT_DIR/${name}.log" 2>&1
@@ -395,9 +455,9 @@ PYTHON
 # Phase 1: prove Forge discovers and initializes the packaged jar itself.
 run_packaged_client packaged-title title
 
-# Phases 2 and 3: connect to a clean Forge server, write real Voxy section
-# persistence, fully exit, then launch the packaged client again and require a
-# successful persisted-section read from the same storage path.
+# Phases 2 and 3: connect to a separate clean Forge server, write real Voxy
+# section persistence, fully exit, then launch the packaged client again and
+# require a successful persisted-section read from the same storage path.
 start_clean_server
 run_packaged_client packaged-world-write world-write
 snapshot_persistence "$REPORT_DIR/persistence-before-reopen.json"
