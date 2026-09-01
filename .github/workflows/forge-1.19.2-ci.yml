@@ -20,6 +20,26 @@ jobs:
       - name: Check out sources
         uses: actions/checkout@v4
 
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-1.19.2-source-${{ github.run_id }}
+          retention-days: 1
+          include-hidden-files: true
+          path: |
+            .github/
+            src/
+            build.gradle
+            gradle.properties
+            settings.gradle
+            gradlew
+            gradlew.bat
+            gradle/
+            FUNCTIONAL_BASELINE.md
+            PORTING.md
+            README.md
+            LICENSE.md
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
