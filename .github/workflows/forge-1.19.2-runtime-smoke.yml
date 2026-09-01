@@ -1,29 +1,31 @@
-name: forge-1.19.2-runtime-smoke
+name: Forge 1.19.2 packaged client validation
 
 on:
   push:
     branches:
       - forge-1.19.2
     paths:
-      - build.gradle
-      - gradle.properties
-      - settings.gradle
-      - gradle/**
-      - src/**
-      - .github/workflows/forge-1.19.2-runtime-smoke.yml
+      - 'build.gradle'
+      - 'gradle.properties'
+      - 'settings.gradle'
+      - 'src/**'
+      - 'ci/run-forge-smoke.sh'
+      - 'ci/run-packaged-forge-smoke.sh'
+      - '.github/workflows/forge-1.19.2-runtime-smoke.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: forge-1.19.2-runtime-smoke
+  group: forge-1.19.2-packaged-client-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  runtime-smoke:
+  packaged-client:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 90
+
     steps:
       - name: Check out sources
         uses: actions/checkout@v4
@@ -37,135 +39,43 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install software OpenGL display
+      - name: Install software OpenGL runtime
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            xvfb mesa-utils libgl1-mesa-dri libglx-mesa0 libasound2t64
-          xvfb-run -a -s '-screen 0 1280x720x24' glxinfo -B | tee glxinfo.txt
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0
 
-      - name: Build and run parity tests
-        shell: bash
-        run: ./gradlew --no-daemon clean test jarJar
-
-      - name: Generate single-player fixture save
+      - name: Build, test, and reobfuscate
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p ci run
-          printf 'eula=true\n' > run/eula.txt
-          cat > run/server.properties <<'PROPERTIES'
-          level-name=autoload
-          online-mode=false
-          allow-nether=false
-          difficulty=peaceful
-          gamemode=creative
-          generate-structures=false
-          max-players=1
-          simulation-distance=3
-          spawn-protection=0
-          sync-chunk-writes=true
-          view-distance=3
-          PROPERTIES
+          set -o pipefail
+          chmod +x gradlew ci/run-forge-smoke.sh ci/run-packaged-forge-smoke.sh
+          ./gradlew --no-daemon clean test jarJar 2>&1 | tee ci/packaged-build.log
 
-          set +e
-          timeout --signal=INT --kill-after=20s 150s \
-            ./gradlew --no-daemon runServer --args='--nogui' \
-            2>&1 | tee ci/server-console.log
-          server_status=${PIPESTATUS[0]}
-          set -e
-
-          cp run/logs/latest.log ci/server-latest.log
-          grep -F 'Done (' ci/server-latest.log
-          if [[ "$server_status" != 0 && "$server_status" != 124 && "$server_status" != 130 && "$server_status" != 143 ]]; then
-            echo "Unexpected server exit status: $server_status" >&2
-            exit "$server_status"
-          fi
-
-          world_dir="$(dirname "$(find run -maxdepth 3 -type f -name level.dat -print -quit)")"
-          test -n "$world_dir"
-          rm -rf run/saves/autoload
-          mkdir -p run/saves
-          cp -a "$world_dir" run/saves/autoload
-          test -f run/saves/autoload/level.dat
-
-      - name: Exercise integrated world and Voxy renderer
+      - name: Validate the installed packaged client
         shell: bash
-        env:
-          LIBGL_ALWAYS_SOFTWARE: '1'
-          GALLIUM_DRIVER: llvmpipe
-          MESA_GL_VERSION_OVERRIDE: '4.6'
-          MESA_GLSL_VERSION_OVERRIDE: '460'
-          ALSOFT_DRIVERS: 'null'
-        run: |
-          set -euo pipefail
-          mkdir -p ci run/config
-          cat > run/config/voxy-config.json <<'JSON'
-          {
-            "enabled": true,
-            "enable_rendering": true,
-            "ingest_enabled": true,
-            "section_render_distance": 4,
-            "service_threads": 2,
-            "sub_division_size": 64.0,
-            "render_vanilla_fog": true,
-            "dont_use_sodium_builder_threads": false,
-            "ssao_mode": "off"
-          }
-          JSON
-          cat > run/options.txt <<'OPTIONS'
-          fullscreen:false
-          graphicsMode:0
-          maxFps:30
-          renderDistance:4
-          simulationDistance:4
-          guiScale:2
-          OPTIONS
+        run: bash ci/run-packaged-forge-smoke.sh
 
-          rm -f run/logs/latest.log
-          set +e
-          timeout --signal=INT --kill-after=20s 210s \
-            xvfb-run -a -s '-screen 0 1280x720x24' \
-            ./gradlew --no-daemon -PruntimeSmoke runClient \
-            --args='--width 854 --height 480' \
-            2>&1 | tee ci/client-console.log
-          client_status=${PIPESTATUS[0]}
-          set -e
+      - name: Require completed validation contract
+        shell: bash
+        run: test -s ci/packaged-runtime-smoke/SUCCESS
 
-          cp run/logs/latest.log ci/client-latest.log
-          grep -F 'Creating Voxy render system' ci/client-latest.log
-          grep -F 'Voxy render system created with' ci/client-latest.log
-
-          if grep -E \
-            'MixinApplyError|MixinTransformerError|NoClassDefFoundError|NoSuchMethodError|NoSuchFieldError|ExceptionInInitializerError|UnsatisfiedLinkError|Reported exception|Crash report saved|Failed to complete lifecycle event' \
-            ci/client-latest.log; then
-            echo 'Fatal runtime signature found in client log.' >&2
-            exit 1
-          fi
-          if grep -F 'Voxy is unsupported on your system.' ci/client-latest.log; then
-            echo 'Software OpenGL did not exercise the Voxy renderer.' >&2
-            exit 1
-          fi
-          if [[ "$client_status" != 0 && "$client_status" != 124 && "$client_status" != 130 && "$client_status" != 143 ]]; then
-            echo "Unexpected client exit status: $client_status" >&2
-            exit "$client_status"
-          fi
-
-          test -d run/saves/autoload/voxy
-          find run/saves/autoload/voxy -type f -print -quit | grep -q .
-
-      - name: Upload runtime evidence
+      - name: Upload packaged jar and runtime evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forge-1.19.2-runtime-smoke-${{ github.sha }}
+          name: voxy-forge-1.19.2-client-validation-${{ github.sha }}
           retention-days: 14
           if-no-files-found: warn
           include-hidden-files: true
           path: |
-            glxinfo.txt
-            ci/
-            run/logs/
-            run/crash-reports/
-            run/saves/autoload/voxy/
+            build/libs/*-all.jar
+            ci/packaged-build.log
+            ci/packaged-runtime-smoke/
+            run-packaged-client/logs/
+            run-packaged-client/crash-reports/
+            run-packaged-client/voxy-smoke-*.json
+            run-packaged-client/.voxy/
+            run-packaged-server/logs/
+            run-packaged-server/crash-reports/

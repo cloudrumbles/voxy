@@ -25,6 +25,7 @@ public final class VoxyMod {
 
     private static final class ClientOnly {
         private static void initialize() {
+            VoxyClientSmoke.register();
             ModMenuIntegration.register();
             ModLoadingContext.get().registerExtensionPoint(
                     ConfigScreenHandler.ConfigScreenFactory.class,

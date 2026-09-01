@@ -63,7 +63,6 @@ public final class VoxyClient {
                 FileOutputStream fis = new FileOutputStream(vf.resolve("voxy.lock").toFile());
                 EXCLUSIVE_LOCK = fis.getChannel().lock(0, Long.MAX_VALUE, false);
             } catch (NonWritableChannelException | IOException e) {
-                //If some error write to log and unsupport
                 Logger.error("Failed to acquire exclusive voxy lock file, mod will be disabled");
                 systemSupported = false;
             }
@@ -88,6 +87,14 @@ public final class VoxyClient {
 
     public static void onInitializeClient() {
         setInstanceFactory();
+    }
+
+    public static boolean isRenderBackendInitialized() {
+        return RENDER_BACKEND_INITIALIZED;
+    }
+
+    public static boolean isRenderBackendReady() {
+        return RENDER_BACKEND_READY;
     }
 
     public static boolean isFrexActive() {
