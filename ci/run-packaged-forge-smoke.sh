@@ -129,23 +129,24 @@ tasks.register('prepareSmokeMods', Sync) {
     from configurations.smokeMods
 }
 
-// ForgeGradle registers runClient after project evaluation. A live matching
-// collection configures it when it appears instead of failing eagerly.
+// ForgeGradle registers run tasks after project evaluation. Configure them
+// lazily, and materialise its source-less default-mod coordinates immediately
+// before the child JVM is spawned; prepareRuns can otherwise remove empty
+// build directories created by the outer shell.
 tasks.matching { it.name == 'runClient' }.configureEach {
     dependsOn tasks.named('prepareSmokeMods')
+}
+tasks.matching { it.name == 'runClient' || it.name == 'runServer' }.configureEach {
+    doFirst {
+        new File(project.buildDir, 'resources/main').mkdirs()
+        new File(project.buildDir, 'classes/java/main').mkdirs()
+    }
 }
 
 java {
     toolchain.languageVersion = JavaLanguageVersion.of(17)
 }
 GRADLE
-
-# A source-less ForgeGradle userdev run still advertises the default mod's
-# class/resource coordinates. SecureJar requires those advertised paths to
-# exist, even though the actual mods under test come solely from mods/.
-mkdir -p \
-    "$PROJECT_DIR/build/resources/main" \
-    "$PROJECT_DIR/build/classes/java/main"
 
 server_pid=""
 server_input_fd_open=false
