@@ -66,7 +66,7 @@ public class RocksDBStorageBackend extends StorageBackend {
                 .setLevelCompactionDynamicLevelBytes(true)
                 .optimizeForPointLookup(128);
 
-        var bCache = new HyperClockCache(128*1024L*1024L,0, 4, false);
+        var bCache = new ClockCache(128 * 1024L * 1024L, 4, false);
         var filter = new BloomFilter(10);
         cfWorldSecOpts.setTableFormatConfig(new BlockBasedTableConfig()
                 .setCacheIndexAndFilterBlocksWithHighPriority(true)

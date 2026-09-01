@@ -16,7 +16,6 @@ import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
-import net.minecraft.world.level.lighting.LayerLightSectionStorage;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.concurrent.ConcurrentLinkedDeque;
@@ -109,8 +108,10 @@ public class VoxelIngestService {
             allEmpty&=section.hasOnlyAir();
             //if (section.isEmpty()) continue;
             var pos = SectionPos.of(chunk.getPos(), i);
-            if (lightingProvider.getDebugSectionType(LightLayer.SKY, pos) != LayerLightSectionStorage.SectionType.LIGHT_AND_DATA && lightingProvider.getDebugSectionType(LightLayer.BLOCK, pos) != LayerLightSectionStorage.SectionType.LIGHT_AND_DATA)
+            if (lightingProvider.getLayerListener(LightLayer.SKY).getDataLayerData(pos) == null
+                    && lightingProvider.getLayerListener(LightLayer.BLOCK).getDataLayerData(pos) == null) {
                 continue;
+            }
             gotLighting = true;
         }
 

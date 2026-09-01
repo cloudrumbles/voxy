@@ -109,7 +109,7 @@ public class VoxyClientInstance extends VoxyInstance {
                 Logger.error("Network handle null");
                 basePath = basePath.resolve("UNKNOWN");
             } else {
-                var info = netHandle.connection.getServerData();
+                var info = Minecraft.getInstance().getCurrentServer();
                 if (info == null) {
                     Logger.error("Server info null");
                     basePath = basePath.resolve("UNKNOWN");

@@ -70,7 +70,7 @@ public class ModelFactory {
         }
     }
 
-    private final Biome DEFAULT_BIOME = Minecraft.getInstance().level.registryAccess().registryOrThrow(Registry.BIOME_REGISTRY).getOrThrow(Biomes.PLAINS).value();
+    private final Biome DEFAULT_BIOME = Minecraft.getInstance().level.registryAccess().registryOrThrow(Registry.BIOME_REGISTRY).getOrThrow(Biomes.PLAINS);
 
     public final SoftwareModelTextureBakery bakery2;
     private final long bakeScratchBuffer = MemoryUtil.nmemAlloc(MODEL_TEXTURE_SIZE*MODEL_TEXTURE_SIZE*8*6);

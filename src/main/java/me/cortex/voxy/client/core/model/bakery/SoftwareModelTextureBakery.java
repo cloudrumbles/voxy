@@ -2,7 +2,6 @@ package me.cortex.voxy.client.core.model.bakery;
 
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 
 import me.cortex.voxy.client.core.model.ModelFactory;
@@ -309,14 +308,13 @@ public class SoftwareModelTextureBakery {
     }
 
     private static void addView(int i, float pitch, float yaw, float rotation, int flip) {
-        var stack = new PoseStack();
-        stack.translate(0.5f, 0.5f, 0.5f);
-        stack.mulPose(makeQuatFromAxisExact(new Vector3f(0, 0, 1), rotation));
-        stack.mulPose(makeQuatFromAxisExact(new Vector3f(1, 0, 0), pitch));
-        stack.mulPose(makeQuatFromAxisExact(new Vector3f(0, 1, 0), yaw));
-        stack.mulPoseMatrix(new Matrix4f().scale(1 - 2 * (flip & 1), 1 - (flip & 2), 1 - ((flip >> 1) & 2)));
-        stack.translate(-0.5f, -0.5f, -0.5f);
-        var mat = new Matrix4f(stack.last().pose());
+        var mat = new Matrix4f()
+                .translate(0.5f, 0.5f, 0.5f)
+                .rotate(makeQuatFromAxisExact(new Vector3f(0, 0, 1), rotation))
+                .rotate(makeQuatFromAxisExact(new Vector3f(1, 0, 0), pitch))
+                .rotate(makeQuatFromAxisExact(new Vector3f(0, 1, 0), yaw))
+                .scale(1 - 2 * (flip & 1), 1 - (flip & 2), 1 - ((flip >> 1) & 2))
+                .translate(-0.5f, -0.5f, -0.5f);
 
         mat = new Matrix4f().set(
                 2, 0, 0, 0,

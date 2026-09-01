@@ -16,6 +16,7 @@ import org.lwjgl.system.MemoryUtil;
 import static org.lwjgl.opengl.GL11.GL_FLOAT;
 import static org.lwjgl.opengl.GL11.GL_TRIANGLES;
 import static org.lwjgl.opengl.GL11.GL_UNSIGNED_SHORT;
+import static org.lwjgl.opengl.GL15.GL_ELEMENT_ARRAY_BUFFER_BINDING;
 import static org.lwjgl.opengl.GL11.glDrawElements;
 import static org.lwjgl.opengl.GL20.glUniformMatrix4fv;
 import static org.lwjgl.opengl.GL33.glBindSampler;
@@ -37,7 +38,7 @@ public class BudgetBufferRenderer {
     static {
         var i = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         i.bind(4096*3*2);
-        int id = i.name;
+        int id = glGetInteger(GL_ELEMENT_ARRAY_BUFFER_BINDING);
         if (i.type() != VertexFormat.IndexType.SHORT) {
             throw new IllegalStateException();
         }

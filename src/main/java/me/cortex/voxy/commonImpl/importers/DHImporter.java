@@ -55,7 +55,7 @@ public class DHImporter implements IDataImporter {
     private final Level world;
     private final int bottomOfWorld;
     private final int worldHeightSections;
-    private final Holder.Reference<Biome> defaultBiome;
+    private final Holder<Biome> defaultBiome;
     private final Registry<Biome> biomeRegistry;
     private final Registry<Block> blockRegistry;
     private Thread runner;
@@ -231,7 +231,9 @@ public class DHImporter implements IDataImporter {
             {
                 var biomeRes = ResourceLocation.tryParse(encEntry.substring(0, idx));
                 var biome = this.biomeRegistry.getOptional(biomeRes).orElse(this.defaultBiome.value());
-                biomeId = this.engine.getMapper().getIdForBiome(this.biomeRegistry.wrapAsHolder(biome));
+                var biomeHolder = this.biomeRegistry.getHolder(this.biomeRegistry.getId(biome))
+                        .orElse(this.defaultBiome);
+                biomeId = this.engine.getMapper().getIdForBiome(biomeHolder);
             }
             {
                 int b = idx + BLOCK_STATE_SEPARATOR_STRING.length();

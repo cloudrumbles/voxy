@@ -28,14 +28,6 @@ public class BakedBlockEntityModel {
     public void render(Matrix4f matrix, int texId) {
         for (var layer : this.layers) {
             if (layer.consumer.isEmpty()) continue;
-            if (layer.layer instanceof RenderType.CompositeRenderType mp) {
-                ResourceLocation textureId = mp.state.textureState.cutoutTexture().orElse(null);
-                if (textureId == null) {
-                    Logger.error("ERROR: Empty texture id for layer: " + layer);
-                } else {
-                    texId = Minecraft.getInstance().getTextureManager().getTexture(textureId).getId();
-                }
-            }
             if (texId == 0) continue;
             BudgetBufferRenderer.setup(layer.consumer.getAddress(), layer.consumer.quadCount(), texId);
             BudgetBufferRenderer.render(matrix);

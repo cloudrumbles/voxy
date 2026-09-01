@@ -141,16 +141,20 @@ public class ARGB {
         return (l * j + k * (i - j)) / i;
     }
 
+    private static int lerpInt(float delta, int start, int end) {
+        return start + Mth.floor(delta * (float)(end - start));
+    }
+
     public static int srgbLerp(float f, int i, int j) {
-        int k = Mth.lerpInt(f, alpha(i), alpha(j));
-        int l = Mth.lerpInt(f, red(i), red(j));
-        int m = Mth.lerpInt(f, green(i), green(j));
-        int n = Mth.lerpInt(f, blue(i), blue(j));
+        int k = lerpInt(f, alpha(i), alpha(j));
+        int l = lerpInt(f, red(i), red(j));
+        int m = lerpInt(f, green(i), green(j));
+        int n = lerpInt(f, blue(i), blue(j));
         return color(k, l, m, n);
     }
 
     public static int linearLerp(float f, int i, int j) {
-        return color(Mth.lerpInt(f, alpha(i), alpha(j)), LINEAR_TO_SRGB[Mth.lerpInt(f, SRGB_TO_LINEAR[red(i)], SRGB_TO_LINEAR[red(j)])] & 255, LINEAR_TO_SRGB[Mth.lerpInt(f, SRGB_TO_LINEAR[green(i)], SRGB_TO_LINEAR[green(j)])] & 255, LINEAR_TO_SRGB[Mth.lerpInt(f, SRGB_TO_LINEAR[blue(i)], SRGB_TO_LINEAR[blue(j)])] & 255);
+        return color(lerpInt(f, alpha(i), alpha(j)), LINEAR_TO_SRGB[lerpInt(f, SRGB_TO_LINEAR[red(i)], SRGB_TO_LINEAR[red(j)])] & 255, LINEAR_TO_SRGB[lerpInt(f, SRGB_TO_LINEAR[green(i)], SRGB_TO_LINEAR[green(j)])] & 255, LINEAR_TO_SRGB[lerpInt(f, SRGB_TO_LINEAR[blue(i)], SRGB_TO_LINEAR[blue(j)])] & 255);
     }
 
     public static int opaque(int i) {

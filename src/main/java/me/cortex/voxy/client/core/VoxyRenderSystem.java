@@ -26,6 +26,7 @@ import me.cortex.voxy.client.core.rendering.section.geometry.IGeometryData;
 import me.cortex.voxy.client.core.rendering.util.DownloadStream;
 import me.cortex.voxy.client.core.rendering.util.PrintfDebugUtil;
 import me.cortex.voxy.client.core.rendering.util.UploadStream;
+import me.cortex.voxy.client.mixin.minecraft.AccessorMinecraft;
 import me.cortex.voxy.client.core.util.GPUTiming;
 import me.cortex.voxy.client.core.util.IrisUtil;
 import me.cortex.voxy.common.Logger;
@@ -366,12 +367,12 @@ public class VoxyRenderSystem {
         float INCREASE_PER_SECOND = 60;
         float DECREASE_PER_SECOND = 30;
         //Auto fps targeting
-        if (Minecraft.getInstance().getFps() < MIN_FPS) {
-            VoxyConfig.CONFIG.subDivisionSize = Math.min(VoxyConfig.CONFIG.subDivisionSize + INCREASE_PER_SECOND / Math.max(1f, Minecraft.getInstance().getFps()), 256);
+        if (AccessorMinecraft.voxy$getFps() < MIN_FPS) {
+            VoxyConfig.CONFIG.subDivisionSize = Math.min(VoxyConfig.CONFIG.subDivisionSize + INCREASE_PER_SECOND / Math.max(1f, AccessorMinecraft.voxy$getFps()), 256);
         }
 
-        if (MAX_FPS < Minecraft.getInstance().getFps() && canDecreaseSize) {
-            VoxyConfig.CONFIG.subDivisionSize = Math.max(VoxyConfig.CONFIG.subDivisionSize - DECREASE_PER_SECOND / Math.max(1f, Minecraft.getInstance().getFps()), 28);
+        if (MAX_FPS < AccessorMinecraft.voxy$getFps() && canDecreaseSize) {
+            VoxyConfig.CONFIG.subDivisionSize = Math.max(VoxyConfig.CONFIG.subDivisionSize - DECREASE_PER_SECOND / Math.max(1f, AccessorMinecraft.voxy$getFps()), 28);
         }
     }
 

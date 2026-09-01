@@ -6,6 +6,8 @@
   "client": [
     "flashback.MixinFlashbackMeta",
     "flashback.MixinFlashbackRecorder",
+    "minecraft.AccessorLightTexture",
+    "minecraft.AccessorMinecraft",
     "minecraft.MixinClientChunkCache",
     "minecraft.MixinClientLevel",
     "minecraft.MixinClientPacketListener",

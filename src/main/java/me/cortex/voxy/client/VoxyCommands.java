@@ -10,6 +10,7 @@ import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.common.DebugUtils;
+import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
 import me.cortex.voxy.commonImpl.importers.DHImporter;
@@ -128,7 +129,7 @@ public final class VoxyCommands {
         }
 
         File finalDatabaseFile = databaseFile;
-        WorldIdentifier engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
+        WorldEngine engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
         if (engine == null) {
             return 1;
         }
@@ -143,7 +144,7 @@ public final class VoxyCommands {
             return false;
         }
 
-        WorldIdentifier engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
+        WorldEngine engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
         if (engine == null) {
             return false;
         }
@@ -294,7 +295,7 @@ public final class VoxyCommands {
         }
 
         String finalInnerDirectory = innerDirectory;
-        WorldIdentifier engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
+        WorldEngine engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
         if (engine == null) {
             return 1;
         }
@@ -314,7 +315,7 @@ public final class VoxyCommands {
             return 1;
         }
 
-        WorldIdentifier world = WorldIdentifier.ofEngineNullable(Minecraft.getInstance().level);
+        WorldEngine world = WorldIdentifier.ofEngineNullable(Minecraft.getInstance().level);
         return world != null && instance.getImportManager().cancelImport(world) ? 0 : 1;
     }
 

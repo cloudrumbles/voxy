@@ -13,6 +13,7 @@ import me.jellysquid.mods.sodium.client.render.chunk.RenderSectionManager;
 import me.jellysquid.mods.sodium.client.render.chunk.compile.executor.ChunkBuilder;
 import me.jellysquid.mods.sodium.client.render.chunk.data.BuiltSectionInfo;
 import me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTrackerHolder;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.ChunkPos;
@@ -52,8 +53,8 @@ public class MixinRenderSectionManager {
     @Inject(method = "<init>", at = @At("TAIL"))
     private void voxy$resetChunkTracker(ClientLevel level, int renderDistance,
                                         CommandList commandList, CallbackInfo callbackInfo) {
-        if (level.levelRenderer != null) {
-            VoxyRenderSystem system = ((IGetVoxyRenderSystem) level.levelRenderer).voxy$getRenderSystem();
+        if (Minecraft.getInstance().levelRenderer != null) {
+            VoxyRenderSystem system = ((IGetVoxyRenderSystem) Minecraft.getInstance().levelRenderer).voxy$getRenderSystem();
             if (system != null) {
                 system.chunkBoundRenderer.reset();
             }
@@ -104,11 +105,11 @@ public class MixinRenderSectionManager {
         }
 
         combinedFlags |= section.getFlags();
-        if (combinedFlags == 0 || this.world.levelRenderer == null) {
+        if (combinedFlags == 0 || Minecraft.getInstance().levelRenderer == null) {
             return;
         }
 
-        VoxyRenderSystem system = ((IGetVoxyRenderSystem) this.world.levelRenderer).voxy$getRenderSystem();
+        VoxyRenderSystem system = ((IGetVoxyRenderSystem) Minecraft.getInstance().levelRenderer).voxy$getRenderSystem();
         if (system == null) {
             return;
         }

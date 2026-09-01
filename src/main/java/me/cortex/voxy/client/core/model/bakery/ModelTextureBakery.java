@@ -29,7 +29,6 @@ import static org.lwjgl.opengl.GL14C.glBlendFuncSeparate;
 import static org.lwjgl.opengl.GL30.*;
 import static org.lwjgl.opengl.GL45.glTextureBarrier;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 
 public class ModelTextureBakery {
     //Note: the first bit of metadata is if alpha discard is enabled
@@ -343,14 +342,13 @@ public class ModelTextureBakery {
     }
 
     private static void addView(int i, float pitch, float yaw, float rotation, int flip) {
-        var stack = new PoseStack();
-        stack.translate(0.5f,0.5f,0.5f);
-        stack.mulPose(makeQuatFromAxisExact(new Vector3f(0,0,1), rotation));
-        stack.mulPose(makeQuatFromAxisExact(new Vector3f(1,0,0), pitch));
-        stack.mulPose(makeQuatFromAxisExact(new Vector3f(0,1,0), yaw));
-        stack.mulPoseMatrix(new Matrix4f().scale(1-2*(flip&1), 1-(flip&2), 1-((flip>>1)&2)));
-        stack.translate(-0.5f,-0.5f,-0.5f);
-        VIEWS[i] = new Matrix4f(stack.last().pose());
+        VIEWS[i] = new Matrix4f()
+                .translate(0.5f, 0.5f, 0.5f)
+                .rotate(makeQuatFromAxisExact(new Vector3f(0, 0, 1), rotation))
+                .rotate(makeQuatFromAxisExact(new Vector3f(1, 0, 0), pitch))
+                .rotate(makeQuatFromAxisExact(new Vector3f(0, 1, 0), yaw))
+                .scale(1 - 2 * (flip & 1), 1 - (flip & 2), 1 - ((flip >> 1) & 2))
+                .translate(-0.5f, -0.5f, -0.5f);
     }
 
     private static Quaternionf makeQuatFromAxisExact(Vector3f vec, float angle) {
