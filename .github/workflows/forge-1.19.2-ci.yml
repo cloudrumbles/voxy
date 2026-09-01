@@ -51,15 +51,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p ci
           jar_file="$(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print -quit)"
           test -n "$jar_file"
-          jar tf "$jar_file" | grep -qx 'META-INF/mods.toml'
-          jar tf "$jar_file" | grep -qx 'client.voxy.mixins.json'
-          jar tf "$jar_file" | grep -qx 'client.voxy.refmap.json'
-          jar tf "$jar_file" | grep -qx 'META-INF/accesstransformer.cfg'
-          jar tf "$jar_file" | grep -q '^me/cortex/voxy/client/core/VoxyRenderSystem.class$'
-          unzip -p "$jar_file" META-INF/mods.toml | grep -F '[1.19.2,1.20)'
-          unzip -p "$jar_file" META-INF/mods.toml | grep -F '[43,)'
+
+          # Materialise the entry list first. Piping `jar tf` into `grep -q`
+          # under pipefail is racy because grep may close the pipe early and
+          # make `jar` exit with SIGPIPE even when the entry exists.
+          jar tf "$jar_file" > ci/jar-entries.txt
+          grep -Fxq 'META-INF/mods.toml' ci/jar-entries.txt
+          grep -Fxq 'client.voxy.mixins.json' ci/jar-entries.txt
+          grep -Fxq 'client.voxy.refmap.json' ci/jar-entries.txt
+          grep -Fxq 'META-INF/accesstransformer.cfg' ci/jar-entries.txt
+          grep -Fxq 'me/cortex/voxy/client/core/VoxyRenderSystem.class' ci/jar-entries.txt
+
+          unzip -p "$jar_file" META-INF/mods.toml > ci/packaged-mods.toml
+          grep -Fq '[1.19.2,1.20)' ci/packaged-mods.toml
+          grep -Fq '[43,)' ci/packaged-mods.toml
           if grep -R --line-number --fixed-strings 'VoxyRenderSystem (stub)' src/main/java; then
             echo 'stub renderer detected' >&2
             exit 1
@@ -90,7 +98,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          if ./gradlew --no-daemon tasks --all | grep -q 'copyCompileClasspath'; then
+          ./gradlew --no-daemon tasks --all > ci/tasks.txt
+          if grep -q '^copyCompileClasspath ' ci/tasks.txt; then
             ./gradlew --no-daemon copyCompileClasspath 2>&1 | tee ci/classpath.log
           fi
 
