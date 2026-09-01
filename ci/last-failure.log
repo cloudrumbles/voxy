@@ -1,0 +1,491 @@
+# Forge 1.19.2 CI failure
+
+commit: 5e06430e027e61208d85dfb8fce05884f321f50b
+
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+
+> Configure project :
+MixinGradle is skipping eclipse integration, extension not found
+
+> Task :clean
+> Task :downloadMcpConfig
+> Task :extractSrg
+> Task :createMcpToSrg
+
+> Task :compileJava
+[05:31:29] [main/INFO]: Writing debug log file accesstransform.log
+[05:31:29] [main/INFO]: Access Transformer processor running version 8.2.14
+[05:31:29] [main/INFO]: Command line arguments [--inJar, /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2/forge-1.19.2-43.5.2-injected.jar, --outJar, /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar, --logFile, accesstransform.log, --atFile, /home/runner/work/voxy/voxy/src/main/resources/META-INF/accesstransformer.cfg, --atFile, /home/runner/work/voxy/voxy/build/_atJar_4/parent_at.cfg]
+[05:31:29] [main/INFO]: Reading from /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2/forge-1.19.2-43.5.2-injected.jar
+[05:31:29] [main/INFO]: Writing to /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar
+[05:31:29] [main/INFO]: Transformer file /home/runner/work/voxy/voxy/src/main/resources/META-INF/accesstransformer.cfg
+[05:31:29] [main/INFO]: Transformer file /home/runner/work/voxy/voxy/build/_atJar_4/parent_at.cfg
+[05:31:29] [main/WARN]: Found existing output jar /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar, overwriting
+[05:31:32] [main/INFO]: JAR transformation complete /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar
+Creating SRG -> MCP TSRG
+Note: SpongePowered MIXIN Annotation Processor Version=0.8.5 (MixinGradle Version=0.7.38)
+Note: Supported obfuscation types: ObfuscationServiceMCP supports [notch] ObfuscationServiceFG3 supports [searge]
+Note: Loading searge mappings from /home/runner/work/voxy/voxy/build/createMcpToSrg/output.tsrg
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/AccessorSodiumOptionsGUI.java:8: error: Mixin has no targets
+@Mixin(SodiumOptionsGUI.class)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinRenderSectionManager.java:33: error: Mixin has no targets
+@Mixin(value = RenderSectionManager.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinSodiumWorldRendererLegacy.java:20: error: Mixin has no targets
+@Mixin(value = SodiumWorldRenderer.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinDefaultChunkRenderer.java:26: error: Mixin has no targets
+@Mixin(value = DefaultChunkRenderer.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinSodiumWorldRenderer.java:20: error: Mixin has no targets
+@Mixin(value = SodiumWorldRenderer.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinSodiumOptionsGUI.java:18: error: Mixin has no targets
+@Mixin(SodiumOptionsGUI.class)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/MixinChunkJobQueue.java:16: error: Mixin target me.jellysquid.mods.sodium.client.render.chunk.compile.executor.ChunkJobQueue could not be found
+@Mixin(targets={"me.jellysquid.mods.sodium.client.render.chunk.compile.executor.ChunkJobQueue"},remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/AccessorChunkTracker.java:8: error: Mixin has no targets
+@Mixin(value = ChunkTracker.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/sodium/AccessorSodiumWorldRenderer.java:10: error: Mixin has no targets
+@Mixin(value = SodiumWorldRenderer.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/nvidium/MixinRenderPipeline.java:13: error: Mixin has no targets
+@Mixin(value = RenderPipeline.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinIrisSamplers.java:17: error: Mixin has no targets
+@Mixin(value = IrisSamplers.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinStandardMacros.java:18: error: Mixin has no targets
+@Mixin(value = StandardMacros.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinIris.java:13: error: Mixin has no targets
+@Mixin(value = Iris.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinPackRenderTargetDirectives.java:13: error: Mixin has no targets
+@Mixin(value = PackRenderTargetDirectives.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinProgramSet.java:22: error: Mixin has no targets
+@Mixin(value = ProgramSet.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinIrisRenderingPipeline.java:22: error: Mixin has no targets
+@Mixin(value = IrisRenderingPipeline.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/IrisRenderingPipelineAccessor.java:8: error: Mixin has no targets
+@Mixin(value = IrisRenderingPipeline.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinMatrixUniforms.java:16: error: Mixin has no targets
+@Mixin(value = CommonUniforms.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/CustomUniformsAccessor.java:11: error: Mixin has no targets
+@Mixin(value = CustomUniforms.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/mixin/iris/MixinShaderPackSourceNames.java:10: error: Mixin has no targets
+@Mixin(value = ShaderPackSourceNames.class, remap = false)
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java:21: error: Mixin has no targets
+@Mixin(FabricWorld.class)
+^
+Note: Writing refmap to /home/runner/work/voxy/voxy/build/tmp/compileJava/compileJava-refmap.json
+Note: Writing refmap to /home/runner/work/voxy/voxy/build/tmp/compileJava/compileJava-refmap.json
+Note: Writing searge composite mappings to /home/runner/work/voxy/voxy/build/tmp/compileJava/compileJava-mappings.tsrg
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/commonImpl/WorldIdentifier.java:9: error: package net.minecraft.core.registries does not exist
+import net.minecraft.core.registries.Registries;
+                                    ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:16: error: package net.fabricmc.fabric.api.client.command.v2 does not exist
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+                                                ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:17: error: package net.fabricmc.fabric.api.client.command.v2 does not exist
+import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
+                                                ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:34: error: cannot find symbol
+    public static LiteralArgumentBuilder<FabricClientCommandSource> register() {
+                                         ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:78: error: cannot find symbol
+    private static int reloadInstance(CommandContext<FabricClientCommandSource> ctx) {
+                                                     ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:98: error: cannot find symbol
+    private static int verifyTLNs(CommandContext<FabricClientCommandSource> ctx, boolean attemptRepair) {
+                                                 ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:112: error: cannot find symbol
+    private static int importDistantHorizons(CommandContext<FabricClientCommandSource> ctx) {
+                                                            ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:151: error: cannot find symbol
+    private static int importRaw(CommandContext<FabricClientCommandSource> ctx) {
+                                                ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:160: error: cannot find symbol
+    private static int importBobby(CommandContext<FabricClientCommandSource> ctx) {
+                                                  ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:170: error: cannot find symbol
+    private static CompletableFuture<Suggestions> importWorldSuggester(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder sb) {
+                                                                                      ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:173: error: cannot find symbol
+    private static CompletableFuture<Suggestions> importBobbySuggester(CommandContext<FabricClientCommandSource> ctx, SuggestionsBuilder sb) {
+                                                                                      ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:220: error: cannot find symbol
+    private static int importCurrentWorldIn(CommandContext<FabricClientCommandSource> ctx) {
+                                                           ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:239: error: cannot find symbol
+    private static int importWorld(CommandContext<FabricClientCommandSource> ctx) {
+                                                  ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:278: error: cannot find symbol
+    private static int importZip(CommandContext<FabricClientCommandSource> ctx) {
+                                                ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/VoxyCommands.java:303: error: cannot find symbol
+    private static int cancelImport(CommandContext<FabricClientCommandSource> ctx) {
+                                                   ^
+  symbol:   class FabricClientCommandSource
+  location: class VoxyCommands
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java:35: error: package me.jellysquid.mods.sodium.client.render.chunk does not exist
+import me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;
+                                                    ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java:38: error: package org.joml does not exist
+import org.joml.Matrix4f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java:39: error: package org.joml does not exist
+import org.joml.Matrix4fc;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/ChunkBoundRenderer.java:16: error: package org.joml does not exist
+import org.joml.Matrix4f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/ChunkBoundRenderer.java:17: error: package org.joml does not exist
+import org.joml.Vector3f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/ChunkBoundRenderer.java:18: error: package org.joml does not exist
+import org.joml.Vector3i;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java:4: error: package net.fabricmc.loader.api does not exist
+import net.fabricmc.loader.api.FabricLoader;
+                              ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java:5: error: package org.vivecraft.api.client does not exist
+import org.vivecraft.api.client.VRRenderingAPI;
+                               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java:11: error: package org.vivecraft.api.client.data does not exist
+import static org.vivecraft.api.client.data.RenderPass.VANILLA;
+                                           ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/ViewportSelector.java:11: error: static import only from classes and interfaces
+import static org.vivecraft.api.client.data.RenderPass.VANILLA;
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/AbstractRenderPipeline.java:17: error: package org.joml does not exist
+import org.joml.Matrix4f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java:179: error: cannot find symbol
+    public Viewport<?> setupViewport(ChunkRenderMatrices matrices, double cameraX, double cameraY, double cameraZ) {
+                                     ^
+  symbol:   class ChunkRenderMatrices
+  location: class VoxyRenderSystem
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java:415: error: cannot find symbol
+    private static Matrix4f computeProjectionMat(Matrix4fc base) {
+                                                 ^
+  symbol:   class Matrix4fc
+  location: class VoxyRenderSystem
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java:415: error: cannot find symbol
+    private static Matrix4f computeProjectionMat(Matrix4fc base) {
+                   ^
+  symbol:   class Matrix4f
+  location: class VoxyRenderSystem
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/AbstractRenderPipeline.java:167: error: cannot find symbol
+    protected static void transformBlitDepth(FullscreenBlit blitShader, int srcDepthTex, int dstFB, Viewport<?> viewport, Matrix4f targetTransform) {
+                                                                                                                          ^
+  symbol:   class Matrix4f
+  location: class AbstractRenderPipeline
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:29: error: cannot find symbol
+    public Matrix4f vanillaProjection = new Matrix4f();
+           ^
+  symbol:   class Matrix4f
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:30: error: cannot find symbol
+    public Matrix4f projection = new Matrix4f();
+           ^
+  symbol:   class Matrix4f
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:31: error: cannot find symbol
+    public Matrix4f modelView = new Matrix4f();
+           ^
+  symbol:   class Matrix4f
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:32: error: cannot find symbol
+    public final FrustumIntersection frustum = new FrustumIntersection();
+                 ^
+  symbol:   class FrustumIntersection
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:33: error: cannot find symbol
+    public final Vector4f[] frustumPlanes;
+                 ^
+  symbol:   class Vector4f
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:38: error: cannot find symbol
+    public final Matrix4f MVP = new Matrix4f();
+                 ^
+  symbol:   class Matrix4f
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:39: error: cannot find symbol
+    public final Vector3i section = new Vector3i();
+                 ^
+  symbol:   class Vector3i
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:40: error: cannot find symbol
+    public final Vector3f innerTranslation = new Vector3f();
+                 ^
+  symbol:   class Vector3f
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:61: error: cannot find symbol
+    public A setVanillaProjection(Matrix4fc projection) {
+                                  ^
+  symbol:   class Matrix4fc
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:66: error: cannot find symbol
+    public A setProjection(Matrix4f projection) {
+                           ^
+  symbol:   class Matrix4f
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:71: error: cannot find symbol
+    public A setModelView(Matrix4fc modelView) {
+                          ^
+  symbol:   class Matrix4fc
+  location: class Viewport<A>
+  where A is a type-variable:
+    A extends Viewport<A> declared in class Viewport
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/ModelFactory.java:23: error: package net.minecraft.core.registries does not exist
+import net.minecraft.core.registries.BuiltInRegistries;
+                                    ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/ModelFactory.java:24: error: package net.minecraft.core.registries does not exist
+import net.minecraft.core.registries.Registries;
+                                    ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java:30: error: package org.joml does not exist
+import org.joml.Matrix4f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java:31: error: package org.joml does not exist
+import org.joml.Quaternionf;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java:32: error: package org.joml does not exist
+import org.joml.Vector3f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java:54: error: cannot find symbol
+    private static final Matrix4f[] VIEWS = new Matrix4f[6];
+                         ^
+  symbol:   class Matrix4f
+  location: class SoftwareModelTextureBakery
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:4: error: package org.joml does not exist
+import org.joml.Matrix4f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:5: error: package org.joml does not exist
+import org.joml.Vector3f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:6: error: package org.joml does not exist
+import org.joml.Vector4f;
+               ^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java:330: error: cannot find symbol
+    private static Quaternionf makeQuatFromAxisExact(Vector3f vec, float angle) {
+                                                     ^
+  symbol:   class Vector3f
+  location: class SoftwareModelTextureBakery
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareModelTextureBakery.java:330: error: cannot find symbol
+    private static Quaternionf makeQuatFromAxisExact(Vector3f vec, float angle) {
+                   ^
+  symbol:   class Quaternionf
+  location: class SoftwareModelTextureBakery
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:13: error: cannot find symbol
+    private final Vector4f scratch = new Vector4f();
+                  ^
+  symbol:   class Vector4f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:15: error: cannot find symbol
+    private final Vector3f scratch1 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:16: error: cannot find symbol
+    private final Vector3f scratch2 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:17: error: cannot find symbol
+    private final Vector3f scratch3 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:18: error: cannot find symbol
+    private final Vector3f scratch4 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:20: error: cannot find symbol
+    private final Vector3f qmuv1 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:21: error: cannot find symbol
+    private final Vector3f qmuv2 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:22: error: cannot find symbol
+    private final Vector3f qmuv3 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:23: error: cannot find symbol
+    private final Vector3f qmuv4 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:26: error: cannot find symbol
+    private final Vector3f scratchR1 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:27: error: cannot find symbol
+    private final Vector3f scratchR2 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:28: error: cannot find symbol
+    private final Vector3f scratchR3 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:30: error: cannot find symbol
+    private final Vector3f a1 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:31: error: cannot find symbol
+    private final Vector3f a2 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:32: error: cannot find symbol
+    private final Vector3f a3 = new Vector3f();
+                  ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:73: error: cannot find symbol
+    public void raster(Matrix4f mvp, ReuseVertexConsumer vertices) {
+                       ^
+  symbol:   class Matrix4f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:82: error: cannot find symbol
+    private void rasterQuad(Matrix4f transform, long addr) {
+                            ^
+  symbol:   class Matrix4f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:208: error: cannot find symbol
+    private static float edge(Vector3f a, Vector3f b, Vector3f c) {
+                              ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:208: error: cannot find symbol
+    private static float edge(Vector3f a, Vector3f b, Vector3f c) {
+                                          ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:208: error: cannot find symbol
+    private static float edge(Vector3f a, Vector3f b, Vector3f c) {
+                                                      ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:212: error: cannot find symbol
+    private static float edge(Vector3f a, Vector3f b, float cx, float cy) {
+                              ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:212: error: cannot find symbol
+    private static float edge(Vector3f a, Vector3f b, float cx, float cy) {
+                                          ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:217: error: cannot find symbol
+    private void loadTransformPos(Matrix4f transform, long addr, int vert, Vector3f out, Vector3f otherAttributesOut) {
+                                  ^
+  symbol:   class Matrix4f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:217: error: cannot find symbol
+    private void loadTransformPos(Matrix4f transform, long addr, int vert, Vector3f out, Vector3f otherAttributesOut) {
+                                                                           ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/model/bakery/SoftwareRasterizer.java:217: error: cannot find symbol
+    private void loadTransformPos(Matrix4f transform, long addr, int vert, Vector3f out, Vector3f otherAttributesOut) {
+                                                                                         ^
+  symbol:   class Vector3f
+  location: class SoftwareRasterizer
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/rendering/Viewport.java:7: error: package org.joml does not exist
+import org.joml.*;
+^
+/home/runner/work/voxy/voxy/src/main/java/me/cortex/voxy/client/core/NormalRenderPipeline.java:18: error: package org.joml does not exist
+import org.joml.Matrix4f;
+               ^
+Note: Writing refmap to /home/runner/work/voxy/voxy/build/tmp/compileJava/compileJava-refmap.json
+Note: Writing refmap to /home/runner/work/voxy/voxy/build/tmp/compileJava/compileJava-refmap.json
+Note: Writing searge composite mappings to /home/runner/work/voxy/voxy/build/tmp/compileJava/compileJava-mappings.tsrg
+100 errors
+only showing the first 100 errors, of 402 total; use -Xmaxerrs if you would like to see more
+
+> Task :compileJava FAILED
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1788240667002.json
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileJava'.
+> Compilation failed; see the compiler error output for details.
+
+* Try:
+> Run with --info option to get more log output.
+> Run with --scan to get full insights.
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.7/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD FAILED in 39s
+5 actionable tasks: 5 executed
