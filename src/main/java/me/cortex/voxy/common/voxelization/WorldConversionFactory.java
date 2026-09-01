@@ -4,8 +4,6 @@ import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import me.cortex.voxy.client.core.util.ExpansionUtil;
 import me.cortex.voxy.common.world.other.Mapper;
 import me.cortex.voxy.common.world.other.Mipper;
-import me.jellysquid.mods.lithium.common.world.chunk.LithiumHashPalette;
-import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.util.LinearCongruentialGenerator;
@@ -24,8 +22,6 @@ import net.minecraft.world.level.chunk.SingleValuePalette;
 import java.util.WeakHashMap;
 
 public class WorldConversionFactory {
-    private static final boolean LITHIUM_INSTALLED = FabricLoader.getInstance().isModLoaded("lithium");
-
     private static final class Cache {
         private final int[] biomeCache = new int[4*4*4];
         private final WeakHashMap<Mapper, Reference2IntOpenHashMap<BlockState>> localMapping = new WeakHashMap<>();
@@ -45,25 +41,6 @@ public class WorldConversionFactory {
     //TODO: create a mapping for world/mapper -> local mapping
     private static final ThreadLocal<Cache> THREAD_LOCAL = ThreadLocal.withInitial(Cache::new);
 
-    private static boolean setupLithiumLocalPallet(Palette<BlockState> vp, Reference2IntOpenHashMap<BlockState> blockCache, Mapper mapper, int[] pc)  {
-        if (vp instanceof LithiumHashPalette<BlockState>) {
-            for (int i = 0; i < vp.getSize(); i++) {
-                BlockState state = null;
-                int blockId = -1;
-                try { state = vp.valueFor(i); } catch (Exception e) {}
-                if (state != null) {
-                    blockId = blockCache.getOrDefault(state, -1);
-                    if (blockId == -1) {
-                        blockId = mapper.getIdForBlockState(state);
-                        blockCache.put(state, blockId);
-                    }
-                }
-                pc[i] = blockId;
-            }
-            return true;
-        }
-        return false;
-    }
     private static int setupLocalPalette(Palette<BlockState> vp, Reference2IntOpenHashMap<BlockState> blockCache, Mapper mapper, int[] pc) {
         int c = vp.getSize();
         if (vp instanceof LinearPalette<BlockState>) {
@@ -109,8 +86,24 @@ public class WorldConversionFactory {
             }
             pc[0] = blockId;
         } else {
-            if (!(LITHIUM_INSTALLED && setupLithiumLocalPallet(vp, blockCache, mapper, pc))) {
-                throw new IllegalStateException("Unknown palette type: " + vp);
+            // Forge mods may supply their own Palette implementation. The
+            // public Palette contract is sufficient to build the same local
+            // lookup table without linking to a loader-specific subclass.
+            for (int i = 0; i < vp.getSize(); i++) {
+                BlockState state = null;
+                try {
+                    state = vp.valueFor(i);
+                } catch (RuntimeException ignored) {
+                }
+                int blockId = -1;
+                if (state != null) {
+                    blockId = blockCache.getOrDefault(state, -1);
+                    if (blockId == -1) {
+                        blockId = mapper.getIdForBlockState(state);
+                        blockCache.put(state, blockId);
+                    }
+                }
+                pc[i] = blockId;
             }
         }
         return c;

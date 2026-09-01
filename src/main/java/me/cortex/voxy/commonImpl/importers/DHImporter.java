@@ -16,7 +16,6 @@ import me.cortex.voxy.commonImpl.importers.IDataImporter.ICompletionCallback;
 import me.cortex.voxy.commonImpl.importers.IDataImporter.IUpdateCallback;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
@@ -103,9 +102,9 @@ public class DHImporter implements IDataImporter {
     public DHImporter(File file, WorldEngine worldEngine, Level mcWorld, ServiceManager servicePool, BooleanSupplier rateLimiter) {
         this.engine = worldEngine;
         this.world = mcWorld;
-        this.biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registries.BIOME);
+        this.biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registry.BIOME_REGISTRY);
         this.defaultBiome = this.biomeRegistry.getHolder(Biomes.PLAINS).orElseThrow();
-        this.blockRegistry = mcWorld.registryAccess().registryOrThrow(Registries.BLOCK);
+        this.blockRegistry = mcWorld.registryAccess().registryOrThrow(Registry.BLOCK_REGISTRY);
 
         this.bottomOfWorld = mcWorld.getMinBuildHeight();
         int worldHeight = mcWorld.getHeight();

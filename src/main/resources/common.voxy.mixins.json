@@ -7,7 +7,6 @@
     "defaultRequire": 1
   },
   "mixins": [
-    "chunky.MixinFabricWorld",
     "distanthorizons.MixinSharedApi",
     "minecraft.MixinWorld"
   ],

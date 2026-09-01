@@ -6,7 +6,7 @@ import com.google.gson.TypeAdapter;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import me.cortex.voxy.common.world.WorldEngine;
-import net.minecraft.core.registries.Registries;
+import net.minecraft.core.Registry;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
@@ -20,7 +20,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 public class WorldIdentifier {
-    private static final ResourceKey<DimensionType> NULL_DIM_KEY = ResourceKey.create(Registries.DIMENSION_TYPE, ResourceLocation.tryParse("voxy:null_dimension_id"));
+    private static final ResourceKey<DimensionType> NULL_DIM_KEY = ResourceKey.create(Registry.DIMENSION_TYPE_REGISTRY, ResourceLocation.tryParse("voxy:null_dimension_id"));
 
     public final ResourceKey<Level> key;
     public final long biomeSeed;
@@ -192,8 +192,8 @@ public class WorldIdentifier {
             long biomeSeed = obj.getAsJsonPrimitive("biomeSeed").getAsLong();
             var sDim = obj.getAsJsonPrimitive("dimension").getAsString();
 
-            var key = ResourceKey.create(Registries.DIMENSION, ResourceLocation.tryParse(sKey));
-            var dim = ResourceKey.create(Registries.DIMENSION_TYPE, ResourceLocation.tryParse(sDim));
+            var key = ResourceKey.create(Registry.DIMENSION_REGISTRY, ResourceLocation.tryParse(sKey));
+            var dim = ResourceKey.create(Registry.DIMENSION_TYPE_REGISTRY, ResourceLocation.tryParse(sDim));
             return new WorldIdentifier(key, biomeSeed, dim);
         }
     }

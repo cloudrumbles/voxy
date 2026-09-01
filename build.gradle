@@ -27,6 +27,23 @@ apply plugin: 'net.minecraftforge.gradle'
 // Mixin Gradle 插件需要在 ForgeGradle 应用后应用,因为它依赖 minecraft/patcher 扩展
 apply plugin: 'org.spongepowered.mixin'
 
+sourceSets {
+    main {
+        java {
+            // Oculus 1.19.2 is based on the old net.coderbot Iris API while
+            // Voxy 0.2.14 targets the later net.irisshaders API. Keep the core
+            // renderer buildable and functional; shader integration is a
+            // separate compatibility layer for this backport.
+            exclude 'me/cortex/voxy/client/iris/**'
+            exclude 'me/cortex/voxy/client/mixin/iris/**'
+            exclude 'me/cortex/voxy/client/mixin/nvidium/**'
+            exclude 'me/cortex/voxy/client/core/IrisVoxyRenderPipeline.java'
+            exclude 'me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java'
+        }
+    }
+}
+
+
 version = project.mod_version
 group = project.maven_group
 base {
@@ -88,10 +105,6 @@ dependencies {
     // used by the functional Voxy baseline. The public 0.3.18.1 release still
     // exposes the older Rubidium layout and is not binary-compatible.
     implementation fg.deobf("org.embeddedt:embeddium-1.19.2:${embeddium_version}")
-
-    // Oculus is optional at runtime but supplies the Iris implementation API
-    // used by Voxy's shader compatibility layer.
-    compileOnly fg.deobf("maven.modrinth:GchcoXML:${oculus_compile_version}")
 
     // Minecraft 1.19.2 and the selected Embeddium build use JOML 1.10.5.
     compileOnly 'org.joml:joml:1.10.5'
@@ -232,4 +245,11 @@ jar {
                 'Implementation-Vendor'   : 'Cortex'
         ])
     }
+}
+
+// Diagnostic helper used by CI to make the exact ForgeGradle compile classpath
+// available for local/offline compiler iteration.
+tasks.register('copyCompileClasspath', Copy) {
+    from configurations.compileClasspath
+    into layout.buildDirectory.dir('compile-classpath')
 }

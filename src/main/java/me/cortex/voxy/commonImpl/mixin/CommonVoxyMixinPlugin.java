@@ -1,6 +1,6 @@
 package me.cortex.voxy.commonImpl.mixin;
 
-import net.fabricmc.loader.api.FabricLoader;
+import me.cortex.voxy.commonImpl.ForgePlatform;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
@@ -20,11 +20,11 @@ public class CommonVoxyMixinPlugin implements IMixinConfigPlugin {
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
         if (mixinClassName.endsWith("chunky.MixinFabricWorld")) {
-            return FabricLoader.getInstance().isModLoaded("chunky");
+            return ForgePlatform.isModLoaded("chunky");
         }
 
         if (mixinClassName.endsWith("distanthorizons.MixinSharedApi")) {
-            return FabricLoader.getInstance().isModLoaded("distanthorizons");
+            return ForgePlatform.isModLoaded("distanthorizons");
         }
 
         return true;

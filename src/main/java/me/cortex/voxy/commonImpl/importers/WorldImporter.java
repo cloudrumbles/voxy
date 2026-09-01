@@ -13,7 +13,6 @@ import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldUpdater;
 import net.minecraft.core.Holder;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
@@ -66,7 +65,6 @@ import me.cortex.voxy.commonImpl.importers.IDataImporter.ICompletionCallback;
 import me.cortex.voxy.commonImpl.importers.IDataImporter.IUpdateCallback;
 import net.minecraft.core.Holder;
 import net.minecraft.core.IdMap;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.core.Registry;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
@@ -104,7 +102,7 @@ public class WorldImporter implements IDataImporter {
         this.world = worldEngine;
         this.service = sm.createService(()->new Pair<>(()->this.jobQueue.poll().run(), ()->{}), 3, "World importer", runChecker);
 
-        var biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registries.BIOME);
+        var biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registry.BIOME_REGISTRY);
         var defaultBiome = biomeRegistry.getHolder(Biomes.PLAINS).orElseThrow();
         this.defaultBiomeProvider = new PalettedContainerRO<>() {
             @Override
