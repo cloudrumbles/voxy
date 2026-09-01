@@ -58,6 +58,26 @@ jobs:
           mkdir -p ci
           ./gradlew --no-daemon clean test 2>&1 | tee ci/test.log
 
+      - name: Preserve resolved renderer dependencies
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci/dependencies
+          while IFS= read -r -d '' file; do
+            cp "$file" "ci/dependencies/$(basename "$file")"
+          done < <(find ~/.gradle/caches -type f \( -iname '*embeddium*.jar' -o -iname 'joml-*.jar' \) -print0)
+          find ci/dependencies -maxdepth 1 -type f -printf '%f\n' | sort || true
+
+      - name: Upload renderer dependency snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-1.19.2-renderer-dependencies-${{ github.run_id }}
+          retention-days: 1
+          if-no-files-found: warn
+          path: ci/dependencies/
+
       - name: Forge build and reobfuscation
         shell: bash
         run: |
