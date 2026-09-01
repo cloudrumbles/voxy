@@ -1,0 +1,96 @@
+name: inspect-forge-1.19.2-dependencies
+
+on:
+  push:
+    branches:
+      - port/forge-1.19.2
+    paths:
+      - .github/workflows/inspect-forge-1.19.2-dependencies.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Download public compatibility jars
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deps inspection
+          curl --fail --location --retry 3 \
+            'https://cdn.modrinth.com/data/sk9rgfiA/versions/AYqEbec0/embeddium-0.3.18.1%2Bmc1.19.2.jar' \
+            -o deps/embeddium.jar
+          curl --fail --location --retry 3 \
+            'https://cdn.modrinth.com/data/GchcoXML/versions/Mw8aFpWF/oculus-mc1.19.2-1.6.9a.jar' \
+            -o deps/oculus.jar
+
+      - name: Record class surfaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '=== EMBEDDIUM CLASSES ==='
+            jar tf deps/embeddium.jar | grep -E '^(me/jellysquid/mods/sodium|org/embeddedt/embeddium)/.*\.class$' | sort
+            echo '=== OCULUS CLASSES ==='
+            jar tf deps/oculus.jar | grep -E '^(net/coderbot/iris|net/irisshaders/iris)/.*\.class$' | sort
+          } > inspection/classes.txt
+
+          targets=(
+            me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer
+            me.jellysquid.mods.sodium.client.render.chunk.RenderSectionManager
+            me.jellysquid.mods.sodium.client.render.chunk.RenderSection
+            me.jellysquid.mods.sodium.client.render.chunk.DefaultChunkRenderer
+            me.jellysquid.mods.sodium.client.render.chunk.AbstractChunkRenderer
+            me.jellysquid.mods.sodium.client.render.chunk.compile.ChunkBuilder
+            me.jellysquid.mods.sodium.client.render.chunk.compile.executor.ChunkBuilder
+            me.jellysquid.mods.sodium.client.render.chunk.compile.executor.ChunkJobQueue
+            me.jellysquid.mods.sodium.client.world.ChunkTracker
+            me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTracker
+            me.jellysquid.mods.sodium.client.render.chunk.map.ChunkTrackerHolder
+            me.jellysquid.mods.sodium.client.render.chunk.data.BuiltSectionInfo
+            me.jellysquid.mods.sodium.client.render.chunk.data.ChunkRenderData
+            me.jellysquid.mods.sodium.client.util.color.ColorSRGB
+            me.jellysquid.mods.sodium.client.util.color.ColorABGR
+            org.embeddedt.embeddium.api.OptionGUIConstructionEvent
+          )
+          : > inspection/embeddium-javap.txt
+          for target in "${targets[@]}"; do
+            echo "=== $target ===" >> inspection/embeddium-javap.txt
+            javap -classpath deps/embeddium.jar -private -s "$target" >> inspection/embeddium-javap.txt 2>&1 || true
+          done
+
+          iris_targets=(
+            net.coderbot.iris.Iris
+            net.irisshaders.iris.Iris
+            net.coderbot.iris.pipeline.IrisRenderingPipeline
+            net.irisshaders.iris.pipeline.IrisRenderingPipeline
+            net.coderbot.iris.shadows.ShadowRenderer
+            net.irisshaders.iris.shadows.ShadowRenderer
+            net.coderbot.iris.uniforms.CommonUniforms
+            net.irisshaders.iris.uniforms.CommonUniforms
+            net.coderbot.iris.shaderpack.ShaderPack
+            net.irisshaders.iris.shaderpack.ShaderPack
+          )
+          : > inspection/oculus-javap.txt
+          for target in "${iris_targets[@]}"; do
+            echo "=== $target ===" >> inspection/oculus-javap.txt
+            javap -classpath deps/oculus.jar -private -s "$target" >> inspection/oculus-javap.txt 2>&1 || true
+          done
+
+      - name: Upload API report
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-1.19.2-compat-api
+          path: inspection/
+          if-no-files-found: error
