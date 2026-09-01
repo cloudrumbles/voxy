@@ -40,21 +40,29 @@ jobs:
             README.md
             LICENSE.md
 
-      - name: Check out Forge 1.20.1 reference port
+      - name: Check out native Forge 1.20.1 reference port
         uses: actions/checkout@v4
         with:
-          repository: realBritakee/voxy-neoforge
-          ref: mc_1201
-          path: ci/reference-1.20.1
+          repository: NHblock-Johnsnow/neo-voxy
+          ref: multiversion
+          path: ci/native-reference-repository
           fetch-depth: 1
 
-      - name: Upload Forge reference snapshot
+      - name: Stage native Forge reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci/native-reference-1.20.1
+          cp -a ci/native-reference-repository/editions/forge-1.20.1-client/. ci/native-reference-1.20.1/
+          rm -rf ci/native-reference-repository
+
+      - name: Upload native Forge reference snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: voxy-forge-1.20.1-reference-${{ github.run_id }}
+          name: voxy-native-forge-1.20.1-reference-${{ github.run_id }}
           retention-days: 1
           include-hidden-files: true
-          path: ci/reference-1.20.1/
+          path: ci/native-reference-1.20.1/
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -66,6 +74,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Capture Embeddium repository metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci/dependency-metadata
+          curl --fail --location --retry 3 \
+            'https://maven.blamejared.com/org/embeddedt/embeddium-1.19.2/maven-metadata.xml' \
+            --output ci/dependency-metadata/embeddium-1.19.2-maven-metadata.xml
+          curl --fail --location --retry 3 \
+            'https://maven.blamejared.com/org/embeddedt/embeddium-1.19.2/' \
+            --output ci/dependency-metadata/embeddium-1.19.2-index.html
 
       - name: Unit and parity tests
         shell: bash
@@ -80,9 +100,21 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p ci/dependencies
+          for root in \
+            "$HOME/.gradle/caches/modules-2/files-2.1/maven.modrinth/sk9rgfiA" \
+            "$HOME/.gradle/caches/modules-2/files-2.1/org.embeddedt/embeddium-1.19.2" \
+            "$HOME/.gradle/caches/modules-2/files-2.1/org.joml/joml"; do
+            if [[ -d "$root" ]]; then
+              while IFS= read -r -d '' file; do
+                name="$(basename "$file")"
+                cp "$file" "ci/dependencies/${name}"
+              done < <(find "$root" -type f -name '*.jar' -print0)
+            fi
+          done
           while IFS= read -r -d '' file; do
-            cp "$file" "ci/dependencies/$(basename "$file")"
-          done < <(find ~/.gradle/caches -type f \( -iname '*embeddium*.jar' -o -iname 'joml-*.jar' \) -print0)
+            name="$(basename "$file")"
+            cp "$file" "ci/dependencies/${name}"
+          done < <(find build -type f \( -iname '*embeddium*.jar' -o -iname '*AYqEbec0*.jar' \) -print0 2>/dev/null || true)
           find ci/dependencies -maxdepth 1 -type f -printf '%f\n' | sort || true
 
       - name: Upload renderer dependency snapshot
@@ -92,7 +124,9 @@ jobs:
           name: forge-1.19.2-renderer-dependencies-${{ github.run_id }}
           retention-days: 1
           if-no-files-found: warn
-          path: ci/dependencies/
+          path: |
+            ci/dependencies/
+            ci/dependency-metadata/
 
       - name: Forge build and reobfuscation
         shell: bash
