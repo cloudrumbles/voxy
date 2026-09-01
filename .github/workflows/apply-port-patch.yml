@@ -5,7 +5,7 @@ on:
     branches:
       - forge-1.19.2
     paths:
-      - ci/port.patch
+      - ci/port.patch.ready
   workflow_dispatch:
 
 permissions:
@@ -26,9 +26,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f ci/port.patch
+          test -f ci/port.patch.ready
+          compgen -G 'ci/port.patch.b64.*' >/dev/null
+          cat ci/port.patch.b64.* | base64 --decode > ci/port.patch
           git apply --index --whitespace=fix ci/port.patch
-          git rm ci/port.patch
+          git rm ci/port.patch.b64.* ci/port.patch.ready
+          rm ci/port.patch
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'port: apply compiler-fix round'
