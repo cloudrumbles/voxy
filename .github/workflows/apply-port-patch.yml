@@ -34,6 +34,13 @@ jobs:
             echo '0d59297bc8fe5abf901320ac913cd061705a43b6dce5a606eb26dc8746f94c04  ci/port.patch' | sha256sum --check
             git apply --check --whitespace=fix ci/port.patch
             git apply --index --whitespace=fix ci/port.patch
+
+            # The Actions token may update repository contents but GitHub does
+            # not permit it to create or modify workflow files. The equivalent
+            # diagnostic classpath capture already lives in this runner, so keep
+            # the source commit free of the forge CI workflow hunk.
+            git restore --source=HEAD --staged --worktree .github/workflows/forge-1.19.2-ci.yml
+
             git rm ci/port.patch.b64.* ci/port.patch.gz.b64.* ci/port.patch.ready
             rm ci/port.patch
             git config user.name 'github-actions[bot]'
