@@ -140,6 +140,13 @@ java {
 }
 GRADLE
 
+# A source-less ForgeGradle userdev run still advertises the default mod's
+# class/resource coordinates. SecureJar requires those advertised paths to
+# exist, even though the actual mods under test come solely from mods/.
+mkdir -p \
+    "$PROJECT_DIR/build/resources/main" \
+    "$PROJECT_DIR/build/classes/java/main"
+
 server_pid=""
 server_input_fd_open=false
 SERVER_FIFO="$REPORT_DIR/server.stdin"
