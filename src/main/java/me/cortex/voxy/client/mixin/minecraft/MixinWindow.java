@@ -11,11 +11,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 @Mixin(Window.class)
 public class MixinWindow {
-    @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/platform/Window;setBootErrorCallback()V"))
-    private void voxy$injectInitWindow(WindowEventHandler eventHandler, ScreenManager screenManager, DisplayData displayData, String fullscreenVideoModeString, String title, CallbackInfo ci) {
-        //System.load("C:\\Program Files\\RenderDoc\\renderdoc.dll");
-
-        //Force the current thread priority to be realtime
+    /*
+     * Mixin 0.8.5 only permits constructor injection after the object has been
+     * fully initialised. The newer upstream hook targeted an invocation inside
+     * <init>, which is rejected on Forge 1.19.2. Running at RETURN preserves
+     * the intended render-thread priority change without touching an
+     * uninitialised Window instance.
+     */
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void voxy$afterInitWindow(
+            WindowEventHandler eventHandler,
+            ScreenManager screenManager,
+            DisplayData displayData,
+            String fullscreenVideoModeString,
+            String title,
+            CallbackInfo ci
+    ) {
         Thread.currentThread().setPriority(Thread.MAX_PRIORITY);
     }
 }
