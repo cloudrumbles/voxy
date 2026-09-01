@@ -30,15 +30,12 @@
     "minecraft.MixinRenderSystem",
     "minecraft.MixinStairBlock",
     "minecraft.MixinWindow",
-    "nvidium.MixinRenderPipeline",
     "sodium.AccessorChunkTracker",
-    "sodium.AccessorSodiumOptionsGUI",
     "sodium.AccessorSodiumWorldRenderer",
     "sodium.MixinChunkJobQueue",
     // "sodium.MixinDefaultChunkRenderer",
     // "sodium.MixinRenderRegionManager",
-    "sodium.MixinRenderSectionManager",
-    "sodium.MixinSodiumOptionsGUI"
+    "sodium.MixinRenderSectionManager"
   ],
   "injectors": {
     "defaultRequire": 1

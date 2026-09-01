@@ -68,9 +68,10 @@ minecraft {
 repositories {
     mavenLocal()
     maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
-    maven { url = 'https://mirrors.cloud.tencent.com/maven/' }
+    maven { url = 'https://mirrors.cloud.tencent.com/repository/maven/' }
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net/' }
+    maven { url = 'https://maven.blamejared.com/' }
     maven {
         name = 'Modrinth'
         url = 'https://api.modrinth.com/maven'
@@ -83,15 +84,23 @@ repositories {
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
-    // Voxy hooks directly into Embeddium's 1.19.2 renderer implementation.
-    implementation fg.deobf('maven.modrinth:sk9rgfiA:AYqEbec0')
+    // The modernized 1.19.2 Embeddium line exposes the Sodium 0.5 renderer API
+    // used by the functional Voxy baseline. The public 0.3.18.1 release still
+    // exposes the older Rubidium layout and is not binary-compatible.
+    implementation fg.deobf("org.embeddedt:embeddium-1.19.2:${embeddium_version}")
 
-    // Embeddium jar-jars JOML at runtime, but Modrinth Maven does not expose
-    // transitive dependencies to the compiler. Keep the same version here.
+    // Oculus is optional at runtime but supplies the Iris implementation API
+    // used by Voxy's shader compatibility layer.
+    compileOnly fg.deobf("maven.modrinth:GchcoXML:${oculus_compile_version}")
+
+    // Minecraft 1.19.2 and the selected Embeddium build use JOML 1.10.5.
     compileOnly 'org.joml:joml:1.10.5'
 
-    // 仅编译期依赖,运行期需要用户自己装 Forge 版的 Sodium/Iris (Rubidium/Embeddium + Oculus)
-    // 由于这些 mod 的 1.20.1 内部 API 与源版本完全不同,本移植禁用了所有对它们的直接 mixin 集成
+    compileOnly "io.github.llamalad7:mixinextras-common:${mixin_extras_version}"
+    annotationProcessor "io.github.llamalad7:mixinextras-common:${mixin_extras_version}"
+    jarJar(implementation("io.github.llamalad7:mixinextras-forge:[${mixin_extras_version},0.6)")) {
+        version { strictly "[${mixin_extras_version},0.6)"; prefer mixin_extras_version }
+    }
 
     // 原生库 (RocksDB / LMDB / zstd / Jedis / LZ4 / XZ / SQLite)
     // 使用 Forge 的 JarJar 机制打包到 mod jar 里
@@ -149,6 +158,9 @@ configurations.configureEach {
     resolutionStrategy.eachDependency { details ->
         if (details.requested.group == 'org.lwjgl') {
             details.useVersion '3.3.1'
+        }
+        if (details.requested.group == 'org.joml') {
+            details.useVersion '1.10.5'
         }
     }
 }

@@ -1,53 +1,49 @@
 package me.cortex.voxy.client;
 
-import com.mojang.brigadier.builder.LiteralArgumentBuilder;
+import me.cortex.voxy.client.config.ModMenuIntegration;
 import me.cortex.voxy.commonImpl.VoxyCommon;
-import net.minecraft.commands.CommandSourceStack;
 import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 
-/**
- * Voxy Forge 1.20.1 主模组入口。
- *
- * - @Mod value 必须与 mods.toml 中的 modId 一致 ("voxy")
- * - 客户端逻辑通过 FMLClientSetupEvent 触发
- * - 命令通过 RegisterClientCommandsEvent 注册
- */
-@Mod(VoxyMod.MODID)
-public class VoxyMod {
-    public static final String MODID = "voxy";
+/** Forge entry point for the 1.19.2 port. */
+@Mod(VoxyMod.MOD_ID)
+public final class VoxyMod {
+    public static final String MOD_ID = "voxy";
 
     public VoxyMod() {
-        // 通用 (客户端+服务端) setup
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::commonSetup);
-        // 仅客户端 setup
-        FMLJavaModLoadingContext.get().getModEventBus().addListener(this::clientSetup);
-        // 客户端命令注册
-        MinecraftForge.EVENT_BUS.addListener(this::onRegisterClientCommands);
+        VoxyCommon.initialize();
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> ClientOnly::initialize);
     }
 
-    private void commonSetup(final FMLCommonSetupEvent event) {
-        // VoxyCommon 的静态块已经处理了 ModContainer 读取与 Serialization.init
-        // 这里不需要额外动作
-    }
+    private static final class ClientOnly {
+        private static void initialize() {
+            ModMenuIntegration.register();
+            ModLoadingContext.get().registerExtensionPoint(
+                    ConfigScreenHandler.ConfigScreenFactory.class,
+                    () -> new ConfigScreenHandler.ConfigScreenFactory(ModMenuIntegration::createConfigScreen)
+            );
 
-    private void clientSetup(final FMLClientSetupEvent event) {
-        event.enqueueWork(() -> {
-            VoxyClient.initVoxyClient();
-            VoxyClient.onInitializeClient();
-        });
-    }
+            IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
+            modBus.addListener(ClientOnly::onClientSetup);
+            MinecraftForge.EVENT_BUS.addListener(ClientOnly::onRegisterClientCommands);
+        }
 
-    private void onRegisterClientCommands(RegisterClientCommandsEvent event) {
-        if (VoxyCommon.isAvailable()) {
-            LiteralArgumentBuilder<CommandSourceStack> cmd = VoxyCommands.register();
-            event.getDispatcher().register(cmd);
+        private static void onClientSetup(FMLClientSetupEvent event) {
+            event.enqueueWork(VoxyClient::onInitializeClient);
+        }
+
+        private static void onRegisterClientCommands(RegisterClientCommandsEvent event) {
+            if (VoxyCommon.isAvailable()) {
+                event.getDispatcher().register(VoxyCommands.register());
+            }
         }
     }
 }
