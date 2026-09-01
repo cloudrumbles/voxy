@@ -20,7 +20,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 public class WorldIdentifier {
-    private static final ResourceKey<DimensionType> NULL_DIM_KEY = ResourceKey.create(Registries.DIMENSION_TYPE, new ResourceLocation("voxy", "null_dimension_id"));
+    private static final ResourceKey<DimensionType> NULL_DIM_KEY = ResourceKey.create(Registries.DIMENSION_TYPE, new ResourceLocation("voxy:null_dimension_id"));
 
     public final ResourceKey<Level> key;
     public final long biomeSeed;
@@ -64,17 +64,13 @@ public class WorldIdentifier {
 
     //Quick access utility method to get or create a world object in the current instance
     public WorldEngine getOrCreateEngine() {
-        return getOrCreateEngine(false);
-    }
-
-    public WorldEngine getOrCreateEngine(boolean allowNull) {
         var instance = VoxyCommon.getInstance();
         if (instance == null) {
             this.cachedEngineObject = null;
             return null;
         }
         var engine = instance.getOrCreate(this);
-        if (allowNull&&engine==null) {
+        if (engine==null) {
             throw new IllegalStateException("Engine null on creation");
         }
         return engine;

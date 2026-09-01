@@ -7,18 +7,15 @@ import com.google.gson.stream.JsonWriter;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import net.minecraftforge.fml.ModList;
+import net.minecraftforge.fml.loading.FMLPaths;
+import net.minecraftforge.forgespi.language.IModInfo;
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.jar.JarEntry;
-import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -98,12 +95,7 @@ public class Serialization {
         Map<Class<?>, GsonConfigSerialization<?>> serializers = new HashMap<>();
 
         Set<String> clazzs = new LinkedHashSet<>();
-        // Forge 中 mod jar 的根路径通过 ModList -> ModFile 获取
-        var modFile = ModList.get().getModFileById("voxy");
-        if (modFile != null) {
-            var path = modFile.getFile().getFilePath();
-            clazzs.addAll(collectAllClasses(path, BASE_SEARCH_PACKAGE));
-        }
+        // On Forge, we scan classes from the classloader rather than mod container paths
         clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
         int count = 0;
         outer:
@@ -173,33 +165,43 @@ public class Serialization {
     }
 
     private static List<String> collectAllClasses(String pack) {
+        // Forge 1.20.1's ModuleClassLoader does not expose directory listings via
+        // getResourceAsStream, so the Fabric-style classloader trick returns null
+        // and NPEs. Locate the voxy jar via ModList and walk it ourselves.
+        Path jarOrDir = null;
         try {
-            InputStream stream = Serialization.class.getClassLoader()
-                    .getResourceAsStream(pack.replaceAll("[.]", "/"));
-            if (stream == null) {
-                return List.of();
+            var mc = ModList.get().getModContainerById("voxy").orElse(null);
+            if (mc != null) {
+                jarOrDir = mc.getModInfo().getOwningFile().getFile().getFilePath();
             }
-            BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
-            return reader.lines().flatMap(inner -> {
-                if (inner.endsWith(".class")) {
-                    return Stream.of(pack + "." + inner.replace(".class", ""));
-                } else if (!inner.contains(".")) {
-                    return collectAllClasses(pack + "." + inner).stream();
-                } else {
-                    return Stream.of();
-                }
-            }).collect(Collectors.toList());
-        } catch (Exception e) {
-            Logger.error("Failed to collect classes in package: " + pack, e);
+        } catch (Throwable t) {
+            Logger.error("Failed to resolve voxy mod file path", t);
+        }
+        if (jarOrDir == null) {
+            Logger.error("Could not locate voxy mod file; 0 config types will be registered");
             return List.of();
         }
+        if (Files.isDirectory(jarOrDir)) {
+            return collectAllClasses(jarOrDir, pack);
+        }
+        String prefix = pack.replace('.', '/') + "/";
+        List<String> out = new ArrayList<>();
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(jarOrDir.toFile())) {
+            var entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                var e = entries.nextElement();
+                String n = e.getName();
+                if (n.startsWith(prefix) && n.endsWith(".class")) {
+                    out.add(n.substring(0, n.length() - 6).replace('/', '.'));
+                }
+            }
+        } catch (IOException e) {
+            Logger.error("Failed to walk voxy jar " + jarOrDir + " for classes in " + pack, e);
+            return List.of();
+        }
+        return out;
     }
     private static List<String> collectAllClasses(Path base, String pack) {
-        // Forge 中 mod jar 可能是一个 zip 文件路径,需要特殊处理
-        if (Files.isRegularFile(base) && base.toString().endsWith(".jar")) {
-            return collectAllClassesFromJar(base, pack);
-        }
-
         if (!Files.exists(base.resolve(pack.replaceAll("[.]", "/")))) {
             return List.of();
         }
@@ -216,24 +218,5 @@ public class Serialization {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-    }
-
-    private static List<String> collectAllClassesFromJar(Path jarPath, String pack) {
-        List<String> result = new ArrayList<>();
-        String prefix = pack.replace(".", "/") + "/";
-        try (JarFile jarFile = new JarFile(jarPath.toFile())) {
-            Enumeration<JarEntry> entries = jarFile.entries();
-            while (entries.hasMoreElements()) {
-                JarEntry entry = entries.nextElement();
-                String name = entry.getName();
-                if (name.startsWith(prefix) && name.endsWith(".class")) {
-                    String className = name.substring(0, name.length() - 6).replace("/", ".");
-                    result.add(className);
-                }
-            }
-        } catch (IOException e) {
-            Logger.error("Failed to collect classes from jar: " + jarPath, e);
-        }
-        return result;
     }
 }

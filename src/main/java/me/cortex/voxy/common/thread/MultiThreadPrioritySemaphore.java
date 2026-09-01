@@ -2,13 +2,53 @@ package me.cortex.voxy.common.thread;
 
 import me.cortex.voxy.common.util.TrackedObject;
 
-import java.util.Arrays;
+import java.util.*;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.IntSupplier;
 
-//Basiclly acts as a priority based mutlti semaphore
-// allows the pooling of multiple threadpools together while prioritizing the work the original was ment for
+// Priority-based multi-semaphore: pools multiple thread pools together while
+// prioritising the work the owner block was meant for.
+//
+// CURRENT STATUS: load-bearing for voxy's UnifiedServiceThreadPool — worker
+// threads block on selfBlock.acquire() to wait for jobs. Despite the author's
+// disclaimer on line ~49, it does in practice work for voxy's internal usage
+// (one block owner = the voxy worker pool, no external sodium integration on
+// Forge 1.20.1 — that integration is disabled via MixinChunkJobQueue's no-op
+// redirect).
+//
+// KNOWN CONCERNS (audit findings, currently latent — not causing observable
+// issues on this workload):
+//
+// 1. Cascading pooledRelease floods (line ~125). pooledRelease(permits)
+//    iterates every Block and releases `permits` to each. With N blocks and M
+//    submissions, queue inflates by N*M; workers wake spuriously, do
+//    tryAcquire, fail, and spin. O(N) per submission. Not currently observable
+//    because voxy has exactly one block (selfBlock from UnifiedServiceThreadPool).
+//    Would matter only if multiple block-owning pools were ever integrated.
+//
+// 2. runJob=false branch (~line 60-65). Acquires the local permit but then
+//    only tries to grab a block permit, accepting failure. The author's own
+//    comment marks this as "technicanlly/actually a failure state." Drift
+//    risk if the failure path is taken under contention. Today no caller uses
+//    acquire(false) — the workerThread always calls bare acquire() (=
+//    acquire(true)), so this branch is unreached.
+//
+// 3. The acquire(true) hot path uses the "no idea if this works" approach
+//    (line ~49 author note). Empirically it does for voxy's single-block
+//    usage; the failure modes would surface as worker starvation or spurious
+//    wake-ups under multi-block contention, neither of which we currently
+//    have configurations to hit.
+//
+// PROPER REWRITE (deferred to a dedicated session): the natural replacement
+// is a LinkedBlockingQueue<Runnable> for the pooled work plus per-block
+// Semaphores for local-priority work, OR a single Phaser with priority
+// awareness. Either design needs a careful state-machine spec covering
+// shutdown, dynamic thread-count changes (UnifiedServiceThreadPool's
+// setNumThreads spawns/retires threads at runtime via selfBlock.release of
+// negative permits — a quirky idiom this rewrite would need to preserve or
+// replace), and the IntSupplier-returning-status-code contract used by the
+// ServiceManager dispatcher.
 public class MultiThreadPrioritySemaphore {
     public static final class Block extends TrackedObject {
         private final Semaphore blockSemaphore = new Semaphore(0);//The work pool semaphore
@@ -26,26 +66,25 @@ public class MultiThreadPrioritySemaphore {
             this.blockSemaphore.release(permits);
         }
 
-        /*
         public void acquire() {
             this.acquire(true);
         }
         public void acquire(boolean runJob) {//Block until a permit for this block is availbe, other jobs maybe executed while we wait
-
-            //while (true) {
-            //    this.blockSemaphore.acquireUninterruptibly();//Block on all
-            //    if (this.localSemaphore.tryAcquire()) {//We prioritize locals first
-            //        return;
-            //    }
-            //    if (runJob) {
-            //        //It wasnt a local job so run
-            //        this.man.tryRun(this);
-            //    } else {
-            //        this.blockSemaphore.release(1);
-            //        Thread.onSpinWait();
-            //        Thread.yield();
-            //    }
-            //}
+            /*
+            while (true) {
+                this.blockSemaphore.acquireUninterruptibly();//Block on all
+                if (this.localSemaphore.tryAcquire()) {//We prioritize locals first
+                    return;
+                }
+                if (runJob) {
+                    //It wasnt a local job so run
+                    this.man.tryRun(this);
+                } else {
+                    this.blockSemaphore.release(1);
+                    Thread.onSpinWait();
+                    Thread.yield();
+                }
+            }*/
 
             //Absolutly no idea if this shitty thing functions correctly... at all, it very much probably doesnt
             while (true) {
@@ -65,29 +104,7 @@ public class MultiThreadPrioritySemaphore {
                     break;
                 }
             }
-        }*/
-
-
-        public void acquire() {
-            this.acquire(true);
         }
-        public void acquire(boolean contributeToPool) {
-            if (contributeToPool) {
-                while (true) {
-                    this.blockSemaphore.acquireUninterruptibly();//Block on all
-                    if (this.localSemaphore.tryAcquire()) {//We prioritize locals first
-                        return;
-                    }
-                    if (this.man.tryRun(this)) {//Returns true if it captured a local job
-                        break;
-                    }
-                }
-            } else {
-                this.localSemaphore.acquireUninterruptibly();//We acquire local first
-                this.blockSemaphore.tryAcquire();//Try acquire a block, if not its... "fine"
-            }
-        }
-
 
 
         public void free() {

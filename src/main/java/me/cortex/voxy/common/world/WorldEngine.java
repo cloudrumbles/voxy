@@ -11,7 +11,7 @@ import java.lang.invoke.VarHandle;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public final class WorldEngine {
+public class WorldEngine {
     public static final int MAX_LOD_LAYER = 4;
 
     public static final int UPDATE_TYPE_BLOCK_BIT = 1;
@@ -20,7 +20,7 @@ public final class WorldEngine {
     public static final int DEFAULT_UPDATE_FLAGS = UPDATE_TYPE_BLOCK_BIT | UPDATE_TYPE_CHILD_EXISTENCE_BIT;
 
     public interface ISectionChangeCallback {void accept(WorldSection section, int updateFlags, int neighborMsk);}
-    public interface ISectionSaveCallback {boolean save(WorldEngine engine, WorldSection section, boolean nonBlocking, boolean sectionAlreadyAcquired);}
+    public interface ISectionSaveCallback {void save(WorldEngine engine, WorldSection section, boolean nonBlocking);}
 
     private final TrackedObject thisTracker = TrackedObject.createTrackedObject(this);
 
@@ -50,13 +50,29 @@ public final class WorldEngine {
         this(storage, null);
     }
 
+    // Section LRU capacity. Config override wins (sectionCacheSize > 0);
+    // otherwise tiered by max heap. The historic fixed 1024 (2048 above
+    // ~3.8 GiB) thrashed at large LOD radii: a rebuild wave requests more
+    // distinct sections than the cache holds, so every wave re-pays
+    // RocksDB get + ZSTD + deserialize per section. Worst-case residency
+    // is capped well under the heap tier (256 KiB per entry upper bound;
+    // most resident sections share pooled or air-shared arrays).
+    private static int computeSectionCacheSize() {
+        int configured = me.cortex.voxy.client.config.VoxyConfig.CONFIG.sectionCacheSize;
+        if (configured > 0) {
+            return Math.max(256, configured);
+        }
+        long maxMem = Runtime.getRuntime().maxMemory();
+        if (maxMem >= (12L << 30)) return 6144;
+        if (maxMem >= (8L << 30))  return 4096;
+        if (maxMem >= (1L << 32) - (200L << 20)) return 2048;
+        return 1024;
+    }
+
     public WorldEngine(SectionStorage storage, @Nullable VoxyInstance instance) {
         this.instanceIn = instance;
 
-        int cacheSize = 1024;
-        if (Runtime.getRuntime().maxMemory()>=(1L<<32)-(200L<<20)) {
-            cacheSize = 2048;
-        }
+        int cacheSize = computeSectionCacheSize();
 
         this.storage = storage;
         this.mapper = new Mapper(this.storage);
@@ -86,10 +102,37 @@ public final class WorldEngine {
 
     public static final int POS_FORMAT_VERSION = 1;
 
+    // Reserved LOD level for per-chunk "this chunk has been processed by
+    // voxy" markers. The LOD bits in getWorldSectionId are 4 bits wide
+    // (0-15); voxy only renders LOD 0-4 (MAX_LOD_LAYER), so 15 is safely
+    // outside the rendering keyspace. Marker keys use the full chunk
+    // (cx, cz) coords without the >>1 shift that normal LOD-0 keys apply,
+    // so the markers are per-chunk accurate (no 2x2 collapse).
+    public static final int CHUNK_MARKER_LOD = 15;
+
     //TODO: Fixme/optimize, cause as the lvl gets higher, the size of x,y,z gets smaller so i can dynamically compact the format
     // depending on the lvl, which should optimize colisions and whatnot
     public static long getWorldSectionId(int lvl, int x, int y, int z) {
         return ((long)lvl<<60)|((long)(y&0xFF)<<52)|((long)(z&((1<<24)-1))<<28)|((long)(x&((1<<24)-1))<<4);//NOTE: 4 bits spare for whatever
+    }
+
+    // Per-chunk marker key. y=0 is just a placeholder.
+    public static long getChunkMarkerKey(int cx, int cz) {
+        return getWorldSectionId(CHUNK_MARKER_LOD, cx, 0, cz);
+    }
+
+    // True iff some voxy path (distant-gen, live-ingest, importer) has
+    // recorded this chunk as fully processed. Cheap RocksDB existence
+    // check (bloom-filtered, microseconds).
+    public boolean isChunkProcessed(int cx, int cz) {
+        return this.storage.containsSection(getChunkMarkerKey(cx, cz));
+    }
+
+    // Records that this chunk has been fully voxelised + inserted. Survives
+    // world reloads. Mark only AFTER all the chunk's sections have been
+    // inserted so a partial chunk isn't falsely marked complete.
+    public void markChunkProcessed(int cx, int cz) {
+        this.storage.markChunkProcessed(getChunkMarkerKey(cx, cz));
     }
 
     public static int getLevel(long id) {
@@ -188,14 +231,12 @@ public final class WorldEngine {
         this.lastActiveTime = System.currentTimeMillis();
     }
 
-    public boolean saveSection(WorldSection section) {
-        return this.saveSection(section, false, false);
+    public void saveSection(WorldSection section) {
+        this.saveSection(section, false);
     }
-
-    public boolean saveSection(WorldSection section, boolean nonBlocking, boolean sectionAlreadyAcquired) {
+    public void saveSection(WorldSection section, boolean nonBlocking) {
         if (this.saveCallback != null) {
-            return this.saveCallback.save(this, section, nonBlocking, sectionAlreadyAcquired);
+            this.saveCallback.save(this, section, nonBlocking);
         }
-        return false;
     }
 }

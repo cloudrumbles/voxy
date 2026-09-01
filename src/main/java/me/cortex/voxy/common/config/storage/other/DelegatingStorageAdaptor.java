@@ -23,6 +23,13 @@ public class DelegatingStorageAdaptor extends StorageBackend {
     }
 
     @Override
+    public boolean containsSectionData(long key) {
+        // Forward to the delegate so any underlying fast-path
+        // (e.g. RocksDB skipping the decompression-adaptor) is preserved.
+        return this.delegate.containsSectionData(key);
+    }
+
+    @Override
     public void setSectionData(long key, MemoryBuffer data) {
         this.delegate.setSectionData(key, data);
     }

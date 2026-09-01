@@ -104,9 +104,21 @@ public class ImportManager {
                 return false;
             }
         }
+        // task.shutdown() is held outside the lock — it can block waiting on
+        // worker drain (importer's shutdown may call Service.blockTillEmpty).
+        // We keep the entry registered during shutdown so tryRunImport refuses
+        // a concurrent start for the same engine.
         task.shutdown();
         synchronized (this) {
-            this.activeImporters.remove(engine);
+            // jobFinished may have removed our entry during shutdown (the
+            // importer completed naturally). Only remove if the entry is
+            // still our task — without this check the blind remove could
+            // clear an unrelated future entry (no current code path replaces
+            // entries, but the defensive shape avoids a footgun for future
+            // refactors).
+            if (this.activeImporters.get(engine) == task) {
+                this.activeImporters.remove(engine);
+            }
         }
         return true;
     }

@@ -15,14 +15,15 @@ import java.util.Arrays;
 import java.util.function.LongConsumer;
 
 public class SectionSerializationStorage extends SectionStorage {
-    public static final int BIGGEST_SERIALIZED_SECTION_SIZE = 32 * 32 * 32 * 8 * 2 + 8;
-
     private final StorageBackend backend;
     public SectionSerializationStorage(StorageBackend storageBackend) {
         this.backend = storageBackend;
     }
 
-    private static final ThreadLocalMemoryBuffer MEMORY_CACHE = new ThreadLocalMemoryBuffer(BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
+    private static final ThreadLocalMemoryBuffer MEMORY_CACHE = new ThreadLocalMemoryBuffer(SaveLoadSystem3.BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
+    // 1-byte buffer used as the value for chunk-marker writes. Value is
+    // never read; only existence of the key matters.
+    private static final ThreadLocalMemoryBuffer MARKER_BUFFER = new ThreadLocalMemoryBuffer(1);
 
     public int loadSection(WorldSection into) {
         var data = this.backend.getSectionData(into.key, MEMORY_CACHE.get().createUntrackedUnfreeableReference());
@@ -31,6 +32,12 @@ public class SectionSerializationStorage extends SectionStorage {
                 this.backend.deleteSectionData(into.key);
                 //TODO: regenerate the section from children
                 Arrays.fill(into._unsafeGetRawDataArray(), Mapper.AIR);
+                // Filled with Mapper.AIR (= 0L), not AIR_FILL_VALUE; the
+                // air-cache invariant is specifically the latter, so this
+                // array must not be tagged as known-air. The caller will
+                // map status<0 to status=1 and immediately invoke
+                // fillWithAir(), which writes the correct AIR_FILL_VALUE.
+                into.markDataDirty();
                 Logger.error("Section " + into.lvl + ", " + into.x + ", " + into.y + ", " + into.z + " was unable to load, removing");
                 return -1;
             } else {
@@ -50,6 +57,19 @@ public class SectionSerializationStorage extends SectionStorage {
         var saveData = SaveLoadSystem3.serialize(section);
         this.backend.setSectionData(section.key, saveData);
         //Note that savedData isnt freed (the save system uses a cache)
+    }
+
+    @Override
+    public boolean containsSection(long key) {
+        return this.backend.containsSectionData(key);
+    }
+
+    @Override
+    public void markChunkProcessed(long key) {
+        // Write a 1-byte sentinel via the storage backend. RocksDB's put
+        // copies the value bytes, so the thread-local buffer is safe to
+        // reuse immediately after.
+        this.backend.setSectionData(key, MARKER_BUFFER.get().createUntrackedUnfreeableReference());
     }
 
     @Override

@@ -8,7 +8,7 @@ layout(local_size_x=LOCAL_SIZE) in;//, local_size_y=1
 #import <voxy:lod/frustum.glsl>
 
 layout(binding = SCENE_UNIFORM_BINDING, std140) uniform SceneUniform {
-    mat4 MVP;
+    mat4 VP;
     ivec3 camSecPos;
     uint packedHizSize;
     vec3 camSubSecPos;
@@ -18,6 +18,9 @@ layout(binding = SCENE_UNIFORM_BINDING, std140) uniform SceneUniform {
     uint frameId;
     uint requestQueueSize;
     float renderDistance;
+    // Non-zero suppresses the "render coarser parent while finer children
+    // stream in" fallback, leaving a gap until the finer LOD is ready.
+    uint hideUnrefinedParents;
 };
 
 #import <voxy:lod/hierarchical/queue.glsl>
@@ -148,7 +151,9 @@ void traverse(in UnpackedNode node) {
                     shouldRenderSelf = (far.x*far.x+far.z*far.z+(16*16*16))<=renderDistance;//the +16*16 is to add some buffer room
                 }
 
-                if (shouldRenderSelf) {
+                // Toggle: when the user opts to hide unrefined LOD cells,
+                // skip emitting the coarser parent and leave a gap instead.
+                if (shouldRenderSelf && hideUnrefinedParents == 0u) {
                     enqueueSelfForRender(node);
                 }
             }

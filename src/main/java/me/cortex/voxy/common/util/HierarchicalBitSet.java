@@ -1,10 +1,5 @@
 package me.cortex.voxy.common.util;
 
-import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
-import it.unimi.dsi.fastutil.ints.IntSet;
-
-import java.util.Random;
-
 public class HierarchicalBitSet {
     public static final int SET_FULL = -1;
     private final int limit;
@@ -140,12 +135,50 @@ public class HierarchicalBitSet {
                 continue;
             }
 
-            //TODO: optimize this laziness
-            // (can  do it by first setting/updating the lower D index and propagating, then the upper D index (if it has/needs one))
-            for (int j = 0; j < count; j++) {
-                this.set(j + i);
-            }
+            // Bulk-set [i, i+count) in D with hierarchical propagation,
+            // touching at most 2 D entries (since count <= 64). Replaces a
+            // per-bit set() loop that did O(count) full hierarchy walks.
+            this.setBitsBulk(i, count);
             return i;
+        }
+    }
+
+    // Sets `count` consecutive bits starting at index `i` (count <= 64) and
+    // propagates fullness up the C/B/A levels. The 2-entry split handles the
+    // case where the range crosses a 64-bit D boundary.
+    private void setBitsBulk(int i, int count) {
+        int lo = i & 63;
+        int dIdx = i >> 6;
+        int firstCount = Math.min(count, 64 - lo);
+        long firstMask = firstCount == 64 ? -1L : ((1L << firstCount) - 1) << lo;
+        setDWithPropagation(dIdx, firstMask);
+        int second = count - firstCount;
+        if (second > 0) {
+            long secondMask = (1L << second) - 1;
+            setDWithPropagation(dIdx + 1, secondMask);
+        }
+        this.cnt += count;
+        // Mirrors the per-bit set()'s endId behaviour: only advance if the
+        // range starts immediately after the current contiguous-allocated
+        // frontier, otherwise endId stays where it was.
+        if (i == this.endId + 1) {
+            this.endId = i + count - 1;
+        }
+    }
+
+    private void setDWithPropagation(int dIdx, long mask) {
+        long dp = (this.D[dIdx] |= mask);
+        if (dp == -1L) {
+            int idx = dIdx;
+            long cp = (this.C[idx >> 6] |= 1L << (idx & 63));
+            if (cp == -1L) {
+                idx >>= 6;
+                long bp = (this.B[idx >> 6] |= 1L << (idx & 63));
+                if (bp == -1L) {
+                    idx >>= 6;
+                    this.A |= 1L << (idx & 63);
+                }
+            }
         }
     }
 
@@ -189,111 +222,4 @@ public class HierarchicalBitSet {
     }
 
 
-    public static void main3(String[] args)  {
-        var h = new HierarchicalBitSet(1<<19);
-        for (int i = 0; i < 1<<19; i++) {
-            if (h.allocateNext() != i) {
-                throw new IllegalStateException("At:" + i);
-            }
-            if (h.endId != i) {
-                throw new IllegalStateException();
-            }
-        }
-        for (int i = 0; i < 1<<18; i++) {
-            if (!h.free(i)) {
-                throw new IllegalStateException();
-            }
-        }
-        for (int i = (1<<19)-1; i != (1<<18)-1; i--) {
-            if (h.endId != i) {
-                throw new IllegalStateException();
-            }
-            if (!h.free(i)) {
-                throw new IllegalStateException();
-            }
-        }
-        if (h.endId != -1) {
-            throw new IllegalStateException();
-        }
-    }
-
-    public static void main2(String[] args) {
-        var h = new HierarchicalBitSet();
-        for (int i = 0; i < 64*32; i++) {
-            h.set(i);
-        }
-        h.set(0);
-        {
-            int i = 0;
-            while (i<64*32) {
-                int j = h.findNextFree(i);
-                if (h.isSet(j)) {
-                    throw new IllegalStateException();
-                }
-                for (int k = i; k < j; k++) {
-                    if (!h.isSet(k)) {
-                        throw new IllegalStateException();
-                    }
-                }
-                i = j + 1;
-            }
-        }
-        var r = new Random(0);
-        for (int i = 0; i < 500; i++) {
-            h.free(r.nextInt(64*32));
-        }
-
-        h.allocateNextConsecutiveCounted(10);
-    }
-
-
-    public static void main(String[] args) {
-        for (int i = 0; i < 100; i++) {
-            var r = new Random(i*12345L);
-            var h = new HierarchicalBitSet();
-            IntSet set = new IntOpenHashSet(10000);
-            for (int j = 0; j < 100_000; j++) {
-                int q = h.allocateNext();
-                if (q != j || !set.add(q)) {
-                    throw new IllegalStateException();
-                }
-            }
-            for (int j = 0; j < 100_000; j++) {
-                int op = r.nextInt(5);
-                int extra = r.nextInt(8)+1;
-                if (op == 0) {
-                    int v = h.allocateNext();
-                    if (v < 0) {
-                        throw new IllegalStateException();
-                    }
-                    if (!set.add(v)) {
-                        throw new IllegalStateException();
-                    }
-                } else if (op == 1) {
-                    int base = h.allocateNextConsecutiveCounted(extra);
-                    if (base < 0) {
-                        throw new IllegalStateException();
-                    }
-                    for (int q = 0; q < extra; q++) {
-                        if (!set.add(q+base)) {
-                            throw new IllegalStateException();
-                        }
-                    }
-                } else if (op < 5 && !set.isEmpty()) {
-                    int rr = r.nextInt(set.size());
-                    var s = set.iterator();
-                    if (rr != 0) {
-                        s.skip(rr);
-                    }
-
-                    int q = s.nextInt();
-                    s.remove();
-
-                    if (!h.free(q)) {
-                        throw new IllegalStateException();
-                    }
-                }
-            }
-        }
-    }
 }

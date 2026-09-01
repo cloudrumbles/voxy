@@ -1,8 +1,12 @@
 package me.cortex.voxy.client;
 
 import me.cortex.voxy.common.Logger;
-import org.lwjgl.system.*;
+import org.lwjgl.system.JNI;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.system.SharedLibrary;
 import org.lwjgl.system.windows.GDI32;
+import org.lwjgl.system.windows.WindowsLibrary;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -10,34 +14,18 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
 
-/**
- * NOTE: Forge 1.20.1 用的 LWJGL 3.3.1 中没有 org.lwjgl.system.windows.Kernel32 类,
- * 也没有 APIUtil.apiGetFunctionAddressOptional 方法 (3.3.2+ 才引入)。
- * 本类内联实现 apiGetFunctionAddressOptional 等价行为,并在 Windows 上手动加载 kernel32。
- */
+import org.lwjgl.system.FunctionProvider;
+
 public class GPUSelectorWindows2 {
-    /** 等价于 LWJGL 3.3.2+ 的 APIUtil.apiGetFunctionAddressOptional */
-    private static long apiGetFunctionAddressOptional(SharedLibrary library, String name) {
-        if (library == null) {
-            return 0L;
-        }
-        long addr = library.getFunctionAddress(name);
-        return addr;
-    }
-
-    /** 手动加载 kernel32,等价于 LWJGL 3.3.2+ Kernel32.getLibrary() */
-    private static SharedLibrary getKernel32Library() {
-        if (Platform.get() != Platform.WINDOWS) {
-            return null;
-        }
+    // LWJGL 3.3.1 does not have apiGetFunctionAddressOptional; implement it here
+    private static long apiGetFunctionAddressOptional(FunctionProvider provider, String functionName) {
         try {
-            return APIUtil.apiCreateLibrary("kernel32");
-        } catch (Throwable t) {
-            return null;
+            return provider.getFunctionAddress(functionName);
+        } catch (Exception e) {
+            return 0;
         }
     }
 
-    private static final SharedLibrary KERNEL32_LIB = getKernel32Library();
     private static final long D3DKMTSetProperties = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTSetProperties");
     private static final long D3DKMTEnumAdapters2 = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTEnumAdapters2");
     private static final long D3DKMTCloseAdapter = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTCloseAdapter");
@@ -232,7 +220,8 @@ public class GPUSelectorWindows2 {
 
     private static final long D3DKMTOpenAdapterFromLuid = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTOpenAdapterFromLuid");
     private static final long D3DKMTOpenAdapterFromHdc = apiGetFunctionAddressOptional(GDI32.getLibrary(), "D3DKMTOpenAdapterFromHdc");
-    private static final long VirtualProtect = apiGetFunctionAddressOptional(KERNEL32_LIB, "VirtualProtect");
+    private static final SharedLibrary kernel32Lib = new WindowsLibrary("kernel32");
+    private static final long VirtualProtect = apiGetFunctionAddressOptional(kernel32Lib, "VirtualProtect");
 
     private static byte[] toByteArray(int... array) {
         byte[] res = new byte[array.length];

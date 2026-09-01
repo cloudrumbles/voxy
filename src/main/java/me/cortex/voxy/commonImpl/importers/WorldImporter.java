@@ -9,25 +9,24 @@ import me.cortex.voxy.common.util.Pair;
 import me.cortex.voxy.common.util.UnsafeUtil;
 import me.cortex.voxy.common.voxelization.VoxelizedSection;
 import me.cortex.voxy.common.voxelization.WorldConversionFactory;
-import me.cortex.voxy.common.voxelization.WorldVoxilizedSectionMipper;
 import me.cortex.voxy.common.world.WorldEngine;
 import me.cortex.voxy.common.world.WorldUpdater;
 import net.minecraft.core.Holder;
-import net.minecraft.core.IdMap;
-import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
-import net.minecraft.nbt.Tag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.Biomes;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.chunk.*;
+import net.minecraft.world.level.chunk.DataLayer;
+import net.minecraft.world.level.chunk.PalettedContainer;
+import net.minecraft.world.level.chunk.PalettedContainerRO;
+import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.chunk.storage.RegionFileVersion;
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
 import org.apache.commons.compress.archivers.zip.ZipFile;
@@ -45,13 +44,14 @@ import java.util.Arrays;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 public class WorldImporter implements IDataImporter {
     private final WorldEngine world;
-    private final PalettedContainerRO<Holder<Biome>> defaultBiomeProvider;
+    private final PalettedContainer<Holder<Biome>> defaultBiomeProvider;
     private final Codec<PalettedContainerRO<Holder<Biome>>> biomeCodec;
     private final Codec<PalettedContainer<BlockState>> blockStateCodec;
     private final AtomicInteger estimatedTotalChunks = new AtomicInteger();//Slowly converges to the true value
@@ -62,71 +62,26 @@ public class WorldImporter implements IDataImporter {
     private final Service service;
 
     private volatile boolean isRunning;
+    // When false (default), per-chunk processed markers cause the importer to
+    // skip chunks already processed by any voxy path. When true, every chunk
+    // is re-voxelised regardless. Set via setForceReimport, e.g. by the
+    // --force flag on the /voxy import command.
+    private volatile boolean forceReimport = false;
+
+    public void setForceReimport(boolean forceReimport) {
+        this.forceReimport = forceReimport;
+    }
 
     public WorldImporter(WorldEngine worldEngine, Level mcWorld, ServiceManager sm, BooleanSupplier runChecker) {
         this.world = worldEngine;
         this.service = sm.createService(()->new Pair<>(()->this.jobQueue.poll().run(), ()->{}), 3, "World importer", runChecker);
 
-        // 1.20.1: RegistryAccess.registryOrThrow 返回 Registry<T> (不是 RegistryLookup)
-        Registry<Biome> biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registries.BIOME);
-        // 1.20.1: Registry.getHolder(ResourceKey) 返回 Optional<Holder.Reference<T>>
-        var defaultBiome = biomeRegistry.getHolder(Biomes.PLAINS).orElseThrow();
-        this.defaultBiomeProvider = new PalettedContainerRO<Holder<Biome>>() {
-            @Override
-            public Holder<Biome> get(int x, int y, int z) {
-                return defaultBiome;
-            }
+        var biomeRegistry = mcWorld.registryAccess().registryOrThrow(Registries.BIOME);
+        var defaultBiome = biomeRegistry.getHolderOrThrow(Biomes.PLAINS);
+        this.defaultBiomeProvider = new PalettedContainer<>(biomeRegistry.asHolderIdMap(), defaultBiome, PalettedContainer.Strategy.SECTION_BIOMES);
 
-            @Override
-            public void getAll(Consumer<Holder<Biome>> action) {
-                action.accept(defaultBiome);
-            }
-
-            @Override
-            public void write(FriendlyByteBuf buf) {
-
-            }
-
-            @Override
-            public int getSerializedSize() {
-                return 0;
-            }
-
-            @Override
-            public boolean maybeHas(Predicate<Holder<Biome>> predicate) {
-                return predicate.test(defaultBiome);
-            }
-
-            @Override
-            public void count(PalettedContainer.CountConsumer<Holder<Biome>> counter) {
-                counter.accept(defaultBiome, 1);
-            }
-
-            @Override
-            public PalettedContainer<Holder<Biome>> recreate() {
-                return null;
-            }
-
-            @Override
-            public PalettedContainerRO.PackedData<Holder<Biome>> pack(IdMap<Holder<Biome>> idMap, PalettedContainer.Strategy strategy) {
-                return null;
-            }
-        };
-
-        // 1.20.1: PalettedContainerFactory 不存在,直接用 PalettedContainer.codecRW/codecRO 静态方法
-        IdMap<Holder<Biome>> biomeIdMap = biomeRegistry.asHolderIdMap();
-        this.biomeCodec = PalettedContainer.codecRO(
-                biomeIdMap,
-                biomeRegistry.holderByNameCodec(),
-                PalettedContainer.Strategy.SECTION_BIOMES,
-                defaultBiome
-        );
-        this.blockStateCodec = PalettedContainer.codecRW(
-                Block.BLOCK_STATE_REGISTRY,
-                BlockState.CODEC,
-                PalettedContainer.Strategy.SECTION_STATES,
-                Blocks.AIR.defaultBlockState()
-        );
+        this.biomeCodec = PalettedContainer.codecRO(biomeRegistry.asHolderIdMap(), biomeRegistry.holderByNameCodec(), PalettedContainer.Strategy.SECTION_BIOMES, defaultBiome);
+        this.blockStateCodec = PalettedContainer.codecRW(Block.BLOCK_STATE_REGISTRY, BlockState.CODEC, PalettedContainer.Strategy.SECTION_STATES, Blocks.AIR.defaultBlockState());
     }
 
 
@@ -200,7 +155,6 @@ public class WorldImporter implements IDataImporter {
     public void importZippedRegionDirectoryAsync(File zip, String innerDirectory) {
         try {
             innerDirectory = innerDirectory.replace("\\\\", "\\").replace("\\", "/");
-            // 1.20.1 commons-compress 1.21 没有 ZipFile.builder() API,直接用构造器
             var file = new ZipFile(zip);
             ArrayList<ZipArchiveEntry> regions = new ArrayList<>();
             for (var e = file.getEntries(); e.hasMoreElements();) {
@@ -259,12 +213,14 @@ public class WorldImporter implements IDataImporter {
                 } catch (Exception e) {
                     throw new RuntimeException(e);
                 }
+                // Backpressure: wait while the chunk-processing backlog
+                // exceeds 10k. Was Thread.sleep(1) (1000Hz busy-poll);
+                // replaced with parkNanos so the service-side
+                // chunksProcessed.incrementAndGet unparks us as soon as
+                // there's headroom. 10ms defensive timeout in case an
+                // unpark is missed.
                 while ((this.totalChunks.get()-this.chunksProcessed.get() > 10_000) && this.isRunning) {
-                    try {
-                        Thread.sleep(1);
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
-                    }
+                    LockSupport.parkNanos(this, 10_000_000L);
                 }
                 if (!this.isRunning) {
                     this.service.blockTillEmpty();
@@ -274,13 +230,12 @@ public class WorldImporter implements IDataImporter {
                 }
             }
             this.service.blockTillEmpty();
+            // Completion wait — final tail after all regions submitted. Was
+            // Thread.yield + Thread.sleep(10); parkNanos with 50ms timeout
+            // means we wake immediately when the last chunk finishes
+            // instead of waiting up to 10ms for the next poll tick.
             while (this.chunksProcessed.get() != this.totalChunks.get() && this.isRunning) {
-                Thread.yield();
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
+                LockSupport.parkNanos(this, 50_000_000L);
             }
             if (!this.isShutdown.getAndSet(true)) {
                 this.worker = null;
@@ -451,37 +406,69 @@ public class WorldImporter implements IDataImporter {
         }
 
         //Dont process non full chunk sections
-        var status = ChunkStatus.byName(chunk.contains("Status") ? chunk.getString("Status") : null);
+        var status = ChunkStatus.byName(chunk.getString("Status"));
         if (status != ChunkStatus.FULL && status != ChunkStatus.EMPTY) {//We also import empty since they are from data upgrade
             this.totalChunks.decrementAndGet();
             return;
         }
 
         try {
-            int x = chunk.contains("xPos") ? chunk.getInt("xPos") : Integer.MIN_VALUE;
-            int z = chunk.contains("zPos") ? chunk.getInt("zPos") : Integer.MIN_VALUE;
+            int x = chunk.getInt("xPos");
+            int z = chunk.getInt("zPos");
             if (x>>5 != regionX || z>>5 != regionZ) {
                 Logger.error("Chunk position is not located in correct region, expected: (" + regionX + ", " + regionZ+"), got: " + "(" + (x>>5) + ", " + (z>>5)+"), importing anyway");
             }
 
-            for (var sectionE : chunk.getList("sections", Tag.TAG_COMPOUND)) {
+            // Per-chunk dedup: skip the section loop entirely if voxy has
+            // already processed this chunk (via distant-gen, live-ingest,
+            // or a prior import run). --force bypasses this.
+            if (!this.forceReimport && this.world.isChunkProcessed(x, z)) {
+                this.updateCallback.onUpdate(this.chunksProcessed.incrementAndGet(), this.estimatedTotalChunks.get());
+                this.unparkWorker();
+                return;
+            }
+
+            for (var sectionE : chunk.getList("sections", 10)) {
                 var section = (CompoundTag) sectionE;
-                int y = section.contains("Y") ? section.getInt("Y") : Integer.MIN_VALUE;
+                int y = section.getByte("Y");
                 this.importSectionNBT(x, y, z, section);
             }
+            // All sections of the chunk imported (or attempted) — mark so
+            // future runs skip it unless --force is set.
+            this.world.markChunkProcessed(x, z);
         } catch (Exception e) {
             Logger.error("Exception importing world chunk:",e);
         }
 
         this.updateCallback.onUpdate(this.chunksProcessed.incrementAndGet(), this.estimatedTotalChunks.get());
+        this.unparkWorker();
+    }
+
+    // Wakes the worker thread parked on backpressure/completion in
+    // importRegionsAsync. Snapshot-then-null-check because the worker
+    // field is nulled on shutdown paths and we may still have in-flight
+    // service tasks calling this after that point.
+    private void unparkWorker() {
+        Thread w = this.worker;
+        if (w != null) {
+            LockSupport.unpark(w);
+        }
     }
 
     private static final byte[] EMPTY = new byte[0];
     private static final ThreadLocal<VoxelizedSection> SECTION_CACHE = ThreadLocal.withInitial(VoxelizedSection::createEmpty);
     private void importSectionNBT(int x, int y, int z, CompoundTag section) {
-        if (section.getCompound("block_states").isEmpty()) {
+        if (!section.contains("block_states", 10)) {
             return;
         }
+
+        // Dedup happens at the chunk level in importChunkNBT via the
+        // per-chunk marker (engine.isChunkProcessed). The previous per-
+        // section containsSection check here was broken — it queried
+        // LOD-0 storage at raw (x,y,z) coords, but LOD-0 worldSections key
+        // by (x>>1, y>>1, z>>1), so the check matched a different (or
+        // non-existent) key and always returned false. Removed; the
+        // chunk-marker path is per-chunk accurate.
 
         byte[] blockLightData = section.getByteArray("BlockLight");
         byte[] skyLightData = section.getByteArray("SkyLight");
@@ -500,18 +487,16 @@ public class WorldImporter implements IDataImporter {
             skyLight = null;
         }
 
-        // 1.20.1: getCompound 返回 CompoundTag(非 Optional),resultOrPartial 返回 Optional<T>
         var blockStatesRes = blockStateCodec.parse(NbtOps.INSTANCE, section.getCompound("block_states"));
-        var blockStatesOpt = blockStatesRes.resultOrPartial(msg -> {});
+        var blockStatesOpt = blockStatesRes.resultOrPartial(Logger::error);
         if (blockStatesOpt.isEmpty()) {
             //TODO: if its only partial, it means should try to upgrade the nbt format with datafixerupper probably
             return;
         }
-        var blockStates = blockStatesOpt.get();
-        var biomes = this.defaultBiomeProvider;
-        var optBiomes = section.getCompound("biomes");
-        if (!optBiomes.isEmpty()) {
-            biomes = this.biomeCodec.parse(NbtOps.INSTANCE, optBiomes).result().orElse(this.defaultBiomeProvider);
+        PalettedContainer<BlockState> blockStates = blockStatesOpt.get();
+        PalettedContainerRO<Holder<Biome>> biomes = this.defaultBiomeProvider;
+        if (section.contains("biomes", 10)) {
+            biomes = this.biomeCodec.parse(NbtOps.INSTANCE, section.getCompound("biomes")).result().orElse(this.defaultBiomeProvider);
         }
         VoxelizedSection csec = WorldConversionFactory.convert(
                 SECTION_CACHE.get().setPosition(x, y, z),
@@ -531,7 +516,7 @@ public class WorldImporter implements IDataImporter {
                 }
         );
 
-        WorldVoxilizedSectionMipper.mipSection(csec, this.world.getMapper());
+        WorldConversionFactory.mipSection(csec, this.world.getMapper());
         WorldUpdater.insertUpdate(this.world, csec);
     }
 }

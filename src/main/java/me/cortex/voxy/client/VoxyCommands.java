@@ -1,24 +1,23 @@
 package me.cortex.voxy.client;
 
-import com.mojang.brigadier.arguments.BoolArgumentType;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
-import com.mojang.brigadier.builder.RequiredArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.Suggestions;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
 import me.cortex.voxy.client.config.VoxyConfig;
-import me.cortex.voxy.client.core.IVoxyRenderSystemHolder;
+import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.common.DebugUtils;
+import me.cortex.voxy.common.distantgen.VoxyDistantGen;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import me.cortex.voxy.commonImpl.WorldIdentifier;
-import me.cortex.voxy.commonImpl.importers.DHImporter;
 import me.cortex.voxy.commonImpl.importers.WorldImporter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.Style;
 import net.minecraft.world.level.dimension.DimensionType;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -29,115 +28,61 @@ import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.CompletableFuture;
 
-/**
- * Voxy 客户端命令 (/voxy reload / import / debug ...)。
- *
- * 在 Fabric 版本使用 ClientCommands API + FabricClientCommandSource,
- * 在 Forge 1.20.1 中 RegisterClientCommandsEvent.getDispatcher() 返回
- * CommandDispatcher<CommandSourceStack>,因此用 CommandSourceStack。
- *
- * 注意: Brigadier 的 literal()/argument() 静态方法是泛型 <S>,在 var 链中
- * 类型推断会回退到 <Object>,导致方法引用 (CommandContext<CommandSourceStack>)
- * 类型不匹配。因此本类不用 static import,改为显式带类型参数调用
- * LiteralArgumentBuilder.<CommandSourceStack>literal(...)
- * RequiredArgumentBuilder.<CommandSourceStack>argument(...)
- */
+
 public class VoxyCommands {
 
     public static LiteralArgumentBuilder<CommandSourceStack> register() {
-        var imports = LiteralArgumentBuilder.<CommandSourceStack>literal("import")
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("world")
-                        .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("world_name", StringArgumentType.string())
+        var imports = Commands.literal("import")
+                .then(Commands.literal("world")
+                        .then(Commands.argument("world_name", StringArgumentType.string())
                                 .suggests(VoxyCommands::importWorldSuggester)
                                 .executes(VoxyCommands::importWorld)))
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("bobby")
-                        .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("world_name", StringArgumentType.string())
-                                .suggests(VoxyCommands::importBobbySuggester)
-                                .executes(VoxyCommands::importBobby)))
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("raw")
-                        .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("path", StringArgumentType.string())
+                .then(Commands.literal("raw")
+                        .then(Commands.argument("path", StringArgumentType.string())
                                 .executes(VoxyCommands::importRaw)))
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("zip")
-                        .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("zipPath", StringArgumentType.string())
+                .then(Commands.literal("zip")
+                        .then(Commands.argument("zipPath", StringArgumentType.string())
                                 .executes(VoxyCommands::importZip)
-                                .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("innerPath", StringArgumentType.string())
+                                .then(Commands.argument("innerPath", StringArgumentType.string())
                                         .executes(VoxyCommands::importZip))))
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("current")
-                        .executes(VoxyCommands::importCurrentWorldIn))
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("cancel")
+                .then(Commands.literal("current")
+                        .executes(ctx -> importCurrentWorldIn(ctx, false))
+                        .then(Commands.literal("force")
+                                .executes(ctx -> importCurrentWorldIn(ctx, true))))
+                .then(Commands.literal("cancel")
                         .executes(VoxyCommands::cancelImport));
 
-        if (DHImporter.HasRequiredLibraries) {
-            imports = imports
-                    .then(LiteralArgumentBuilder.<CommandSourceStack>literal("distant_horizons")
-                            .then(RequiredArgumentBuilder.<CommandSourceStack, String>argument("sqlDbPath", StringArgumentType.string())
-                                    .executes(VoxyCommands::importDistantHorizons)));
-        }
+        var debug = Commands.literal("debug")
+                .then(Commands.literal("verifyTLNChildMask")
+                        .executes(VoxyCommands::verifyTLNs)
+                )
+                .then(Commands.literal("heightmapDump")
+                        .then(Commands.argument("ring", IntegerArgumentType.integer(0,
+                                        me.cortex.voxy.client.core.rendering.heightmap.TerrainHeightmapBuilder.RINGS - 1))
+                                .executes(VoxyCommands::heightmapDump))
+                );
 
-        var debug = LiteralArgumentBuilder.<CommandSourceStack>literal("debug")
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("verifyTLNChildMask")
-                        .executes(ctx -> verifyTLNs(ctx, false))
-                        .then(RequiredArgumentBuilder.<CommandSourceStack, Boolean>argument("attemptRepair", BoolArgumentType.bool())
-                                .executes(ctx -> verifyTLNs(ctx, BoolArgumentType.getBool(ctx, "attemptRepair")))));
+        var distantGen = Commands.literal("distantgen")
+                .then(Commands.argument("radius", IntegerArgumentType.integer(1, 1024))
+                        .executes(VoxyCommands::distantGen));
 
-        return LiteralArgumentBuilder.<CommandSourceStack>literal("voxy")
-                .then(LiteralArgumentBuilder.<CommandSourceStack>literal("reload")
+        return Commands.literal("voxy")//.requires((ctx)-> VoxyCommon.getInstance() != null)
+                .then(Commands.literal("reload")
                         .executes(VoxyCommands::reloadInstance))
                 .then(imports)
-                .then(debug);
-    }
-
-    private static void sendError(CommandContext<CommandSourceStack> ctx, Component msg) {
-        ctx.getSource().sendSystemMessage(Component.literal("").append(msg).setStyle(Style.EMPTY.withColor(0xFF5555)));
+                .then(debug)
+                .then(distantGen);
     }
 
     private static int reloadInstance(CommandContext<CommandSourceStack> ctx) {
-        try {
-            return reloadInstance0(ctx);
-        } catch (Throwable e) {
-            // 捕获所有异常 (包括 Error),把根因直接发给用户,
-            // 避免 Brigadier 包裹成 "试图执行该命令时出现意外错误"。
-            var root = e;
-            while (root.getCause() != null && root.getCause() != root) {
-                root = root.getCause();
-            }
-            var msg = Component.literal("Voxy reload failed: " + root.getClass().getSimpleName() + ": " + root.getMessage());
-            sendError(ctx, msg);
-            // 同时记录完整堆栈到日志
-            me.cortex.voxy.common.Logger.error("reloadInstance command failed", e);
+        var instance = (VoxyClientInstance)VoxyCommon.getInstance();
+        if (instance == null) {
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
-    }
-
-    private static int reloadInstance0(CommandContext<CommandSourceStack> ctx) {
-        // 如果 instance 为 null,尝试创建实例 (可能 sessionStart 未触发或创建失败)
-        if (VoxyCommon.getInstance() == null) {
-            if (!VoxyCommon.isAvailable()) {
-                sendError(ctx, Component.literal("Voxy is not available (mod not initialized properly)"));
-                return 1;
-            }
-            if (!VoxyConfig.CONFIG.enabled) {
-                sendError(ctx, Component.literal("Voxy is disabled in config (set enabled=true in voxy-config.json)"));
-                return 1;
-            }
-            // 尝试创建实例
-            VoxyCommon.createInstance();
-            if (VoxyCommon.getInstance() == null) {
-                sendError(ctx, Component.literal("Failed to create Voxy instance, check logs for errors"));
-                return 1;
-            }
-            // 实例刚创建,尝试创建渲染器
-            var holder = IVoxyRenderSystemHolder.getNullableHolder();
-            if (holder != null) {
-                holder.voxy$createRenderer();
-            }
-            ctx.getSource().sendSystemMessage(Component.literal("Voxy instance created").setStyle(Style.EMPTY.withColor(0x55FF55)));
-            return 0;
-        }
-
-        var vrsh = IVoxyRenderSystemHolder.getNullableHolder();
-        if (vrsh != null) {
-            vrsh.voxy$shutdownRenderer();
+        var wr = Minecraft.getInstance().levelRenderer;
+        if (wr!=null) {
+            ((IGetVoxyRenderSystem)wr).shutdownRenderer();
         }
 
         VoxyCommon.shutdownInstance();
@@ -145,63 +90,92 @@ public class VoxyCommands {
         VoxyCommon.createInstance();
 
         var r = Minecraft.getInstance().levelRenderer;
-        if (r instanceof IVoxyRenderSystemHolder h) {
-            h.voxy$createRenderer();
-        }
+        if (r != null) r.allChanged();
         return 0;
     }
 
-    private static int verifyTLNs(CommandContext<CommandSourceStack> ctx, boolean attemptRepair) {
+    private static int verifyTLNs(CommandContext<CommandSourceStack> ctx) {
         var instance = VoxyCommon.getInstance();
         if (instance == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
         if (Minecraft.getInstance().level == null) {
             throw new IllegalStateException("How you even do this");
         }
-        var engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
-        if (engine != null) {
-            DebugUtils.verifyAllTopLevelNodes(engine, attemptRepair);
-            return 0;
-        }
-        return 1;
+        DebugUtils.verifyAllTopLevelNodes(WorldIdentifier.ofEngine(Minecraft.getInstance().level));
+        return 0;
     }
 
-    private static int importDistantHorizons(CommandContext<CommandSourceStack> ctx) {
+    // Phase 1 of the horizon-silhouette shadow plan: build the LOD terrain
+    // heightmap from level-4 mip data and dump it as a PNG, so the data
+    // source can be visually verified before anything in the render path
+    // consumes it. Runs off-thread (uses acquireIfExists only — never forces
+    // loads); result path is reported in chat and the log.
+    private static int heightmapDump(CommandContext<CommandSourceStack> ctx) {
         var instance = VoxyCommon.getInstance();
         if (instance == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
-        var dbFile = new File(ctx.getArgument("sqlDbPath", String.class));
-        if (!dbFile.exists()) {
+        var level = Minecraft.getInstance().level;
+        var player = Minecraft.getInstance().player;
+        if (level == null || player == null) {
+            ctx.getSource().sendFailure(Component.literal("No active level"));
             return 1;
         }
-        if (dbFile.isDirectory()) {
-            dbFile = dbFile.toPath().resolve("DistantHorizons.sqlite").toFile();
-            if (!dbFile.exists()) {
-                return 1;
+        var engine = WorldIdentifier.ofEngineNullable(level);
+        if (engine == null) {
+            ctx.getSource().sendFailure(Component.literal("No voxy engine for current dimension"));
+            return 1;
+        }
+        int ring = IntegerArgumentType.getInteger(ctx, "ring");
+        int centerX = (int) player.getX();
+        int centerZ = (int) player.getZ();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "Building clipmap ring " + ring + " off-thread; result path will be reported in chat"), false);
+        var thread = new Thread(() -> {
+            try {
+                var map = me.cortex.voxy.client.core.rendering.heightmap.TerrainHeightmapBuilder.build(
+                        engine, ring,
+                        me.cortex.voxy.client.core.rendering.heightmap.TerrainHeightmapBuilder.originSectionFor(ring, centerX),
+                        me.cortex.voxy.client.core.rendering.heightmap.TerrainHeightmapBuilder.originSectionFor(ring, centerZ),
+                        new me.cortex.voxy.client.core.rendering.heightmap.TerrainHeightmapBuilder.FoliageCache());
+                var target = new File(net.minecraftforge.fml.loading.FMLPaths.GAMEDIR.get().toFile(),
+                        "voxy-heightmap-ring" + ring + ".png");
+                map.dumpPng(target);
+                Minecraft.getInstance().execute(() -> {
+                    var p = Minecraft.getInstance().player;
+                    if (p != null) {
+                        p.displayClientMessage(Component.literal(
+                                "Heightmap dumped to " + target.getAbsolutePath()), false);
+                    }
+                });
+            } catch (Throwable t) {
+                me.cortex.voxy.common.Logger.error("Heightmap dump failed: " + t.getMessage(), t);
             }
-        }
-
-        File dbFile_ = dbFile;
-        var engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
-        if (engine == null) return 1;
-        return instance.getImportManager().makeAndRunIfNone(engine, () ->
-                new DHImporter(dbFile_, engine, Minecraft.getInstance().level, instance.getServiceManager(), instance.savingServiceRateLimiter)) ? 0 : 1;
+        }, "Voxy heightmap dump");
+        thread.setDaemon(true);
+        thread.start();
+        return 0;
     }
 
+
     private static boolean fileBasedImporter(File directory) {
-        var instance = VoxyCommon.getInstance();
+        return fileBasedImporter(directory, false);
+    }
+
+    private static boolean fileBasedImporter(File directory, boolean force) {
+        var instance = (VoxyClientInstance)VoxyCommon.getInstance();
         if (instance == null) {
             return false;
         }
 
         var engine = WorldIdentifier.ofEngine(Minecraft.getInstance().level);
-        if (engine == null) return false;
-        return instance.getImportManager().makeAndRunIfNone(engine, () -> {
+        if (engine==null) return false;
+        return instance.getImportManager().makeAndRunIfNone(engine, ()->{
             var importer = new WorldImporter(engine, Minecraft.getInstance().level, instance.getServiceManager(), instance.savingServiceRateLimiter);
+            importer.setForceReimport(force);
             importer.importRegionDirectoryAsync(directory);
             return importer;
         });
@@ -209,27 +183,15 @@ public class VoxyCommands {
 
     private static int importRaw(CommandContext<CommandSourceStack> ctx) {
         if (VoxyCommon.getInstance() == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
-        return fileBasedImporter(new File(ctx.getArgument("path", String.class))) ? 0 : 1;
-    }
 
-    private static int importBobby(CommandContext<CommandSourceStack> ctx) {
-        if (VoxyCommon.getInstance() == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
-            return 1;
-        }
-        var file = new File(".bobby").toPath().resolve(ctx.getArgument("world_name", String.class)).toFile();
-        return fileBasedImporter(file) ? 0 : 1;
+        return fileBasedImporter(new File(ctx.getArgument("path", String.class)))?0:1;
     }
 
     private static CompletableFuture<Suggestions> importWorldSuggester(CommandContext<CommandSourceStack> ctx, SuggestionsBuilder sb) {
         return fileDirectorySuggester(Minecraft.getInstance().gameDirectory.toPath().resolve("saves"), sb);
-    }
-
-    private static CompletableFuture<Suggestions> importBobbySuggester(CommandContext<CommandSourceStack> ctx, SuggestionsBuilder sb) {
-        return fileDirectorySuggester(Minecraft.getInstance().gameDirectory.toPath().resolve(".bobby"), sb);
     }
 
     private static CompletableFuture<Suggestions> fileDirectorySuggester(Path dir, SuggestionsBuilder sb) {
@@ -238,18 +200,18 @@ public class VoxyCommands {
             str = str.substring(1);
         }
         if (str.endsWith("\"")) {
-            str = str.substring(0, str.length() - 1);
+            str = str.substring(0,str.length()-1);
         }
         var remaining = str;
         if (str.contains("/")) {
             int idx = str.lastIndexOf('/');
-            remaining = str.substring(idx + 1);
+            remaining = str.substring(idx+1);
             try {
                 dir = dir.resolve(str.substring(0, idx));
             } catch (Exception e) {
                 return Suggestions.empty();
             }
-            str = str.substring(0, idx + 1);
+            str = str.substring(0, idx+1);
         } else {
             str = "";
         }
@@ -264,39 +226,42 @@ public class VoxyCommands {
                 if (wn.equals(remaining)) {
                     continue;
                 }
-                if (SharedSuggestionProvider.matchesSubStr(remaining, wn) || SharedSuggestionProvider.matchesSubStr(remaining, '"' + wn)) {
-                    wn = str + wn + "/";
+                if (SharedSuggestionProvider.matchesSubStr(remaining, wn) || SharedSuggestionProvider.matchesSubStr(remaining, '"'+wn)) {
+                    wn = str+wn + "/";
                     sb.suggest(StringArgumentType.escapeIfRequired(wn));
                 }
             }
-        } catch (IOException e) {
-        }
+        } catch (IOException e) {}
 
         return sb.buildFuture();
     }
 
-    private static int importCurrentWorldIn(CommandContext<CommandSourceStack> ctx) {
+
+    private static int importCurrentWorldIn(CommandContext<CommandSourceStack> ctx, boolean force) {
         if (VoxyCommon.getInstance() == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
 
         var localServer = Minecraft.getInstance().getSingleplayerServer();
         if (localServer == null) {
-            sendError(ctx, Component.translatable("You must be in single player to use this command"));
+            ctx.getSource().sendFailure(Component.translatable("You must be in single player to use this command"));
             return 1;
         }
         var regionPath = DimensionType.getStorageFolder(Minecraft.getInstance().level.dimension(), localServer.getWorldPath(LevelResource.ROOT)).resolve("region");
-        if ((!regionPath.toFile().exists()) || !regionPath.toFile().isDirectory()) {
-            sendError(ctx, Component.translatable("Cannot find region folder for current dimension"));
+        if ((!regionPath.toFile().exists())||!regionPath.toFile().isDirectory()) {
+            ctx.getSource().sendFailure(Component.translatable("Cannot find region folder for current dimension"));
             return 1;
         }
-        return fileBasedImporter(regionPath.toFile()) ? 0 : 1;
+        if (force) {
+            ctx.getSource().sendSuccess(() -> Component.literal("Forcing re-import — every chunk will be re-voxelised regardless of existing markers"), false);
+        }
+        return fileBasedImporter(regionPath.toFile(), force)?0:1;
     }
 
     private static int importWorld(CommandContext<CommandSourceStack> ctx) {
         if (VoxyCommon.getInstance() == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
 
@@ -304,14 +269,14 @@ public class VoxyCommands {
         var file = new File("saves").toPath().resolve(name);
         name = name.toLowerCase(Locale.ROOT);
         if (name.endsWith("/")) {
-            name = name.substring(0, name.length() - 1);
+            name = name.substring(0, name.length()-1);
         }
         if (file.resolve("level.dat").toFile().exists()) {
             var dimFile = DimensionType.getStorageFolder(Minecraft.getInstance().level.dimension(), file)
                     .resolve("region")
                     .toFile();
             if (!dimFile.isDirectory()) return 1;
-            return fileBasedImporter(dimFile) ? 0 : 1;
+            return fileBasedImporter(dimFile)?0:1;
         } else {
             if (!(name.endsWith("region"))) {
                 file = file.resolve("region");
@@ -321,16 +286,15 @@ public class VoxyCommands {
     }
 
     private static int importZip(CommandContext<CommandSourceStack> ctx) {
-        var zip = new File(ctx.getArgument("zipPath", String.class));
+        var zip =  new File(ctx.getArgument("zipPath", String.class));
         var innerDir = "region/";
         try {
             innerDir = ctx.getArgument("innerPath", String.class);
-        } catch (Exception e) {
-        }
+        } catch (Exception e) {}
 
-        var instance = VoxyCommon.getInstance();
+        var instance = (VoxyClientInstance)VoxyCommon.getInstance();
         if (instance == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
         String finalInnerDir = innerDir;
@@ -346,15 +310,58 @@ public class VoxyCommands {
         return 1;
     }
 
-    private static int cancelImport(CommandContext<CommandSourceStack> ctx) {
-        var instance = VoxyCommon.getInstance();
+    private static int distantGen(CommandContext<CommandSourceStack> ctx) {
+        var instance = (VoxyClientInstance) VoxyCommon.getInstance();
         if (instance == null) {
-            sendError(ctx, Component.translatable("Voxy must be enabled in settings to use this"));
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
+            return 1;
+        }
+        if (!VoxyConfig.CONFIG.distantGenEnabled) {
+            ctx.getSource().sendFailure(Component.literal(
+                    "Distant generation is disabled — set distantGenEnabled=true in voxy-config.json"));
+            return 1;
+        }
+        var server = Minecraft.getInstance().getSingleplayerServer();
+        if (server == null) {
+            ctx.getSource().sendFailure(Component.literal("Distant gen requires single-player (Phase 1)"));
+            return 1;
+        }
+        var clientLevel = Minecraft.getInstance().level;
+        if (clientLevel == null) {
+            ctx.getSource().sendFailure(Component.literal("No active level"));
+            return 1;
+        }
+        var serverLevel = server.getLevel(clientLevel.dimension());
+        if (serverLevel == null) {
+            ctx.getSource().sendFailure(Component.literal("No server level for current dimension"));
+            return 1;
+        }
+        var engine = WorldIdentifier.ofEngine(serverLevel);
+        if (engine == null) {
+            ctx.getSource().sendFailure(Component.literal("No voxy engine for current dimension"));
+            return 1;
+        }
+
+        int radius = IntegerArgumentType.getInteger(ctx, "radius");
+        var coord = VoxyDistantGen.getOrCreate(serverLevel, engine, instance.getServiceManager());
+        coord.scheduler().setMaxInFlight(VoxyConfig.CONFIG.distantGenThreads);
+        int submitted = coord.submitArea(radius);
+        ctx.getSource().sendSuccess(
+                () -> Component.literal("Distant-gen: submitted " + submitted + " chunks within radius " + radius
+                        + " (threads=" + VoxyConfig.CONFIG.distantGenThreads + ")"),
+                false);
+        return 0;
+    }
+
+    private static int cancelImport(CommandContext<CommandSourceStack> ctx) {
+        var instance = (VoxyClientInstance)VoxyCommon.getInstance();
+        if (instance == null) {
+            ctx.getSource().sendFailure(Component.translatable("Voxy must be enabled in settings to use this"));
             return 1;
         }
         var world = WorldIdentifier.ofEngineNullable(Minecraft.getInstance().level);
         if (world != null) {
-            return instance.getImportManager().cancelImport(world) ? 0 : 1;
+            return instance.getImportManager().cancelImport(world)?0:1;
         }
         return 1;
     }

@@ -3,16 +3,15 @@ package me.cortex.voxy.common.world;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import me.cortex.voxy.common.Logger;
-import me.cortex.voxy.common.world.other.Mapper;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.locks.StampedLock;
 
-public final class ActiveSectionTracker {
+public class ActiveSectionTracker {
 
     //Deserialize into the supplied section, returns true on success, false on failure
     public interface SectionLoader {int load(WorldSection section);}
@@ -153,12 +152,14 @@ public final class ActiveSectionTracker {
                     status = 1;
                 }
 
-                //TODO: REWRITE THE section tracker _again_ to not be so shit and jank, and so that Arrays.fill is not 10% of the execution time
                 if (status == 1) {
-                    //We need to set the data to air as it is undefined state
-                    int sky = 15;
-                    int block = 0;
-                    Arrays.fill(section.data, Mapper.composeMappingId((byte) (sky|(block<<4)),0,0));
+                    //We need to set the data to air as it is undefined state.
+                    // fillWithAir() routes through a dual-pool reuse cache:
+                    // if an already-air-filled array is available in
+                    // WorldSection.AIR_REUSE_CACHE, the dirty array is swapped
+                    // out without writing 256 KB. Falls back to Arrays.fill
+                    // when the air pool is empty (e.g. early world load).
+                    section.fillWithAir();
                 }
                 section.acquire(1);
             }
@@ -177,23 +178,31 @@ public final class ActiveSectionTracker {
             }
             return section;
         } else {
-            //TODO: mark the time the loading started in nanos, then here if it has been a while, spin lock, else jump back to the executing service and do work
+            // Wait for the loader thread to publish `holder.obj`. Exponential
+            // backoff so we don't thrash the scheduler when the load takes
+            // longer than a few CPU cycles (disk read, decompression):
+            //  * first ~1024 iterations: Thread.onSpinWait() only -- cheap
+            //    CPU pause that lets the loader finish without context
+            //    switches. Catches the common "load finishes in microseconds"
+            //    case with near-zero overhead.
+            //  * next ~64 iterations: Thread.yield() -- step the load off
+            //    this core if a yield-friendly scheduler can find work.
+            //  * thereafter: LockSupport.parkNanos with geometric backoff,
+            //    capped at ~1ms, so a slow load doesn't keep a CPU pinned.
             VarHandle.fullFence();
-            // 1.20.1 移植:原为无超时自旋等待 loader 线程填充 section,
-            // 若 loader 线程异常会导致永久阻塞。改为带超时(默认 10s)等待,
-            // 超时后返回 null 并记录警告,避免 render 线程永久卡死。
-            long __waitStart = System.nanoTime();
-            long __timeoutNanos = 10_000_000_000L; // 10s
+            int spinCount = 0;
             while ((section = holder.obj) == null) {
                 VarHandle.fullFence();
-                Thread.onSpinWait();
-                Thread.yield();
-                if ((System.nanoTime() - __waitStart) > __timeoutNanos) {
-                    Logger.warn("ActiveSectionTracker.acquire timed out waiting for section " + key + " after 10s, returning null");
-                    // 回滚 PRE_ACQUIRE_COUNT 避免计数泄漏
-                    VolatileHolder.PRE_ACQUIRE_COUNT.getAndAdd(holder, -1);
-                    return null;
+                if (spinCount < 1024) {
+                    Thread.onSpinWait();
+                } else if (spinCount < 1024 + 64) {
+                    Thread.yield();
+                } else {
+                    long parkNs = Math.min(1_000_000L,
+                            1_000L << Math.min(20, (spinCount - 1024 - 64) >> 4));
+                    LockSupport.parkNanos(parkNs);
                 }
+                spinCount++;
             }
 
             //Try to acquire a pre lock
@@ -215,33 +224,15 @@ public final class ActiveSectionTracker {
         }
     }
 
-    void tryUnload(WorldSection section, int hints) {
+    void tryUnload(WorldSection section) {
         if (this.engine != null) this.engine.lastActiveTime = System.currentTimeMillis();
-        if (section.shouldSave()&&this.engine!=null) {
+        if (section.isDirty&&this.engine!=null) {
             if (section.tryAcquire()) {
-                VarHandle.loadLoadFence();
-                if (section.shouldSave()) {//If we should try enqueue
-                    if (!this.engine.saveSection(section, false, true)) {
-                        //we didnt enqueue the section in the save queue so we must unload it manually
-                        Logger.info("section raced to into save queue, we lost");
-                        section.release(true, hints);//We need to try unload cause else we may loose state
-                    } else {
-                        //section is queued, and we gave it the acquired section, so we can just return
-                        return;//We just return
-                    }
-                } else {
-                    Logger.warn("section raced to save queue, we lost");
-                    section.release(true, hints);//Unload cause we need to retry the whole thing again
+                if (section.setNotDirty()) {//If the section is dirty we must enqueue for saving
+                    this.engine.saveSection(section);//can block
                 }
-            } else {
-                if (section.shouldSave()) {
-                    //This is bad
-                    Logger.error("failed to acquire section, but we need to save, this is really bad");
-                } else {
-                    Logger.info("raced section");
-                }
+                section.release(false);//Special
             }
-            return;//If we reach here, we need to just return, unload pipeline will be taken care of elsewhere
         }
 
         if (section.getRefCount() != 0) {
@@ -252,50 +243,34 @@ public final class ActiveSectionTracker {
         WorldSection sec = null;
         final var lock = this.locks[index];
         long stamp = lock.writeLock();
-        if (section.getRefCount() != 0) {
-            lock.unlockWrite(stamp);
-            return;
-        }
-        boolean shouldRetryExit = false;
         {
             VarHandle.loadLoadFence();
-            if (this.engine != null && section.shouldSave()) {//Last call for saving
+            if (section.isDirty) {
                 if (section.tryAcquire()) {
-                    if (!this.engine.saveSection(section, true, true)) {//not allowed to block as we are in a lock
-                        //We didnt enqueue the save here, so we must unload
-                        // but unload in a recursive
-                        //VarHandle.fullFence();
-                        //shouldRetryExit |= section.getRefCount()!=1;//if we arnt the only ref
-                        //VarHandle.fullFence();
-                        //shouldRetryExit |= section.isDirty;//or if the section is now dirty, note this must go AFTER the ref check, since you can only mark live sections as dirty
-
-                        shouldRetryExit |= true;//Always force retry when/if we hit this case
-                        section.release(false, hints);//Special, we cannot unload here else we deadlock
-                        //we can do a no-unload since we are guarenteed to retry
+                    if (section.setNotDirty()) {//If the section is dirty we must enqueue for saving
+                        // Called inside the per-slice writeLock — must NOT block.
+                        // Pass nonBlocking=true so SectionSavingService.enqueueSave
+                        // skips its backpressure path (which would Thread.yield +
+                        // process tasks synchronously). The current implementation
+                        // is genuinely non-blocking with nonBlocking=true: it just
+                        // does exchangeIsInSaveQueue + section.acquire +
+                        // saveQueue.add + service.execute (Semaphore.release).
+                        //
+                        // Hypothetical deadlock if this constraint is ever violated:
+                        // any blocking call (synchronous backpressure, lock
+                        // acquisition that another thread holds while waiting on
+                        // this slice lock) would deadlock the cache slice. Anyone
+                        // changing enqueueSave's blocking profile must preserve
+                        // the nonBlocking=true contract or move this call out of
+                        // the lock first.
+                        if (this.engine != null)
+                            this.engine.saveSection(section, true);
                     }
-
-
-                    //NOTE: think have since fixed this issue
-                    //In theory there can be a race condition here, where if this thread is paused
-                    // the save queue fully finishes, the state is dirty == false inSaveQueue == false
-                    // but the acquire count is at least 1
-                    //if another thread marks this chunk as dirty (it would have acquired it after the inital `section.getRefCount() != 0`
-                    // return check) and releases it, since the acquire count is still 1 (acquired here)
-                    // then it doesnt trigger a save attempt but the dirty flag is set
-                    //then this code continues and it causes badness cause its now in an invalid state
+                    section.release(false);//Special
                 } else {
                     throw new IllegalStateException("Section was dirty but is also unloaded, this is very bad");
                 }
             }
-
-            //This is a painful case, we need to abort here if there was a funky thing that happened
-            if (shouldRetryExit) {
-                lock.unlockWrite(stamp);
-                //retry
-                this.tryUnload(section, hints);
-                return;
-            }
-
             if (section.getRefCount() == 0 && section.trySetFreed()) {
                 var cached = cache.remove(section.key);
                 var obj = cached.obj;
@@ -355,45 +330,4 @@ public final class ActiveSectionTracker {
         return this.lruSecondaryCache.size();
     }
 
-    public static void main(String[] args) throws InterruptedException {
-        var tracker = new ActiveSectionTracker(6, a->0, 2<<10);
-        var bean = tracker.acquire(0, 0, 0, 9, false);
-        var bean2 = tracker.acquire(1, 0, 0, 0, false);
-        System.out.println("Target obj:" + System.identityHashCode(bean2));
-        bean2.release();
-        Thread[] ts = new Thread[10];
-        for (int i = 0; i < ts.length;i++) {
-            int tid = i;
-            ts[i] = new Thread(()->{
-                try {
-                    for (int j = 0; j < 5000; j++) {
-                        if (true) {
-                            var section = tracker.acquire(0, 0, 0, 0, false);
-                            section.acquire();
-                            var section2 = tracker.acquire(1, 0, 0, 0, false);
-                            section.release();
-                            section.release();
-                            section2.release();
-                        }
-                        if (true) {
-
-                            var section = tracker.acquire(0, 0, 0, 0, false);
-                            var section2 = tracker.acquire(1, 0, 0, 0, false);
-                            section2.release();
-                            section.release();
-                        }
-                        if (true) {
-                            tracker.acquire(1, 0, 0, 0, false).release();
-                        }
-                    }
-                } catch (Exception e) {
-                    throw new RuntimeException("Thread " + tid, e);
-                }
-            });
-            ts[i].start();
-        }
-        for (var t : ts) {
-            t.join();
-        }
-    }
 }

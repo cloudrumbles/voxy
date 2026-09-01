@@ -19,18 +19,26 @@
   "voxy.config.general.rendering": "Voxy Rendering",
   "voxy.config.general.rendering.tooltip": "Enables or disables voxy rendering",
 
-  "voxy.config.general.subDivisionSize": "Pixels^2 of subdivision size",
-  "voxy.config.general.subDivisionSize.tooltip": "Maximum size in pixels (squared) of screenspace AABB before subdiving to smaller LoDs (Smaller being higher quality)",
-
   "voxy.config.general.renderDistance": "Render distance",
   "voxy.config.general.renderDistance.tooltip": "Render distance of voxy in chunks",
 
   "voxy.config.general.environmental_fog": "Enable environmental fog",
   "voxy.config.general.environmental_fog.tooltip": "Enables or disables voxy rendering environmental fog",
 
-  "voxy.config.general.render_fog": "Enable render fog",
-  "voxy.config.general.render_fog.tooltip": "Enables or disables render fog effect",
+  "voxy.config.general.hide_unrefined_lod": "Hide unrefined LOD cells",
+  "voxy.config.general.hide_unrefined_lod.tooltip": "Hide LOD cells whose finest-detail mesh has not yet streamed in, instead of showing the coarser parent. Trades visible progressive refinement for visible holes during streaming.",
 
-  "voxy.config.general.ssao_mode": "SSAO Mode",
-  "voxy.config.general.ssao_mode.tooltip": "The mode used for screenspace ambient occlusion (Auto attempts to pick the best option while reducing performance impact)"
+  "voxy.config.distantgen": "Distant Generation",
+
+  "voxy.config.distantgen.enabled": "Enable distant generation",
+  "voxy.config.distantgen.enabled.tooltip": "When enabled, voxy will continuously generate and LOD chunks outside Minecraft's render distance up to the configured radius. Runs in all loaded dimensions (overworld, nether, end, modded). Master toggle: turning off freezes new distant-gen work; existing LODs remain visible.",
+
+  "voxy.config.distantgen.radius": "Distant generation radius",
+  "voxy.config.distantgen.radius.tooltip": "Maximum chunk distance from each player out to which distant generation will fill. Independent of voxy's render radius and Minecraft's render distance. Larger values generate further but take much longer to complete.",
+
+  "voxy.config.distantgen.threads": "Distant generation threads",
+  "voxy.config.distantgen.threads.tooltip": "Maximum number of chunks being generated concurrently per dimension. Higher values speed up fill rate but increase server-tick impact. Recommended: 2 for steady background fill on most systems. Empirically, values above 4 noticeably impact tick time even when chunks are already on disk.",
+
+  "voxy.config.distantgen.verbose_logging": "Verbose logging (debug)",
+  "voxy.config.distantgen.verbose_logging.tooltip": "Emits per-chunk INFO logs at every phase of distant-gen processing. Useful for diagnosing where chunks are getting stuck. Very verbose: leave off unless you need it. Heartbeat with counters always runs regardless."
 }

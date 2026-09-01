@@ -2,5 +2,5 @@
 out vec4 colour;
 in vec2 UV;
 void main() {
-    colour = vec4(1,0,1,1);
+    colour = vec4(0,1,0,1);
 }

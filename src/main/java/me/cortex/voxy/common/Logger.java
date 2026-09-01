@@ -53,17 +53,16 @@ public class Logger {
         String error = (INSERT_CLASS?("["+callClsName()+"]: "):"") + Stream.of(args).map(Logger::objToString).collect(Collectors.joining(" "));
         LOGGER.error(error, throwable);
         if (VoxyCommon.IS_IN_MINECRAFT && !VoxyCommon.IS_DEDICATED_SERVER) {
-            showInHUD(error);//This is done so that on dedicated server, the Minecraft client class isnt loaded
+            error0(error);//This is done so that on dedicated server, the Minecraft client class isnt loaded
         }
     }
 
-    public static void showInHUD(String msg) {
+    private static void error0(String error) {
         var instance = Minecraft.getInstance();
         if (instance != null) {
             instance.executeIfPossible(() -> {
                 var player = Minecraft.getInstance().player;
-                // 1.20.1 中 Gui 没有 handleSystemMessage 方法,改用 ChatComponent.addMessage
-                if (player != null) instance.gui.getChat().addMessage(Component.literal(msg));
+                if (player != null) instance.getChatListener().handleSystemMessage(Component.literal(error), true);
             });
         }
     }
@@ -81,9 +80,9 @@ public class Logger {
         LOGGER.warn((INSERT_CLASS?("["+callClsName()+"]: "):"") + Stream.of(args).map(Logger::objToString).collect(Collectors.joining(" ")), throwable);
     }
 
-    public static String info(Object... args) {
+    public static void info(Object... args) {
         if (SHUTUP||SHUTUP_INFO) {
-            return "";
+            return;
         }
         Throwable throwable = null;
         for (var i : args) {
@@ -91,9 +90,23 @@ public class Logger {
                 throwable = (Throwable) i;
             }
         }
-        var val = (INSERT_CLASS?("["+callClsName()+"]: "):"") + Stream.of(args).map(Logger::objToString).collect(Collectors.joining(" "));
-        LOGGER.info(val, throwable);
-        return val;
+        LOGGER.info((INSERT_CLASS?("["+callClsName()+"]: "):"") + Stream.of(args).map(Logger::objToString).collect(Collectors.joining(" ")), throwable);
+    }
+
+    public static void debug(Object... args) {
+        if (SHUTUP) {
+            return;
+        }
+        if (!LOGGER.isDebugEnabled()) {
+            return;
+        }
+        Throwable throwable = null;
+        for (var i : args) {
+            if (i instanceof Throwable) {
+                throwable = (Throwable) i;
+            }
+        }
+        LOGGER.debug((INSERT_CLASS?("["+callClsName()+"]: "):"") + Stream.of(args).map(Logger::objToString).collect(Collectors.joining(" ")), throwable);
     }
 
     private static String objToString(Object obj) {

@@ -1,20 +1,17 @@
 package me.cortex.voxy.common.world.other;
 
 import com.mojang.serialization.Dynamic;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.config.IMappingStorage;
 import me.cortex.voxy.common.util.Pair;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.Holder;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtOps;
 import net.minecraft.util.datafix.DataFixers;
 import net.minecraft.util.datafix.fixes.References;
 import net.minecraft.world.level.biome.Biome;
-import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.LeavesBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -27,7 +24,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -43,23 +39,51 @@ public class Mapper {
     public static final long UNKNOWN_MAPPING = -1;
     public static final long AIR = 0;
 
+    // id -> entry tables are copy-on-write arrays: mutated ONLY under the
+    // respective lock (grow-by-copy then volatile publish), read lock-free
+    // from hot paths (Mipper opacity loop, mesh gen). The previous
+    // ObjectArrayList was read lock-free while add() could grow the backing
+    // array under the lock — a concurrent reader could observe a stale or
+    // partially-copied backing array (the author's old TODO acknowledged
+    // this). With COW, readers see an immutable fully-published snapshot.
     private final ReentrantLock blockLock = new ReentrantLock();
     private final ConcurrentHashMap<BlockState, StateEntry> block2stateEntry = new ConcurrentHashMap<>(2000,0.75f, 10);
-    private final ObjectArrayList<StateEntry> blockId2stateEntry = new ObjectArrayList<>();
+    private volatile StateEntry[] blockId2stateEntry = new StateEntry[0];
 
 
     private final ReentrantLock biomeLock = new ReentrantLock();
     private final ConcurrentHashMap<String, BiomeEntry> biome2biomeEntry = new ConcurrentHashMap<>(2000,0.75f, 10);
-    private final ObjectArrayList<BiomeEntry> biomeId2biomeEntry = new ObjectArrayList<>();
+    private volatile BiomeEntry[] biomeId2biomeEntry = new BiomeEntry[0];
 
     private Consumer<StateEntry> newStateCallback;
     private Consumer<BiomeEntry> newBiomeCallback;
+
+    // Coalesces the WAL fsync that follows each id-mapping write. The
+    // crash-consistency invariant is that a mapping must be durable before
+    // any SECTION data referencing its id is durable; mappings and sections
+    // share one RocksDB WAL, and WAL recovery replays a strict prefix, so
+    // write ORDER alone guarantees the invariant — the fsync only bounds
+    // how much tail can be lost (mapping + dependent sections are then lost
+    // TOGETHER, which is consistent). Fsyncing per registration made
+    // first-join-to-a-modpack bursts serialize hundreds of fsyncs under
+    // blockLock; coalescing to one per interval keeps a durability
+    // heartbeat without the per-id stall.
+    private static final long MAPPING_FLUSH_INTERVAL_NS = 100_000_000L;
+    private final java.util.concurrent.atomic.AtomicLong lastMappingFlush = new java.util.concurrent.atomic.AtomicLong(Long.MIN_VALUE);
+
+    private void flushMappingsCoalesced() {
+        long now = System.nanoTime();
+        long last = this.lastMappingFlush.get();
+        if (now - last >= MAPPING_FLUSH_INTERVAL_NS && this.lastMappingFlush.compareAndSet(last, now)) {
+            this.storage.flush();
+        }
+    }
     public Mapper(IMappingStorage storage) {
         this.storage = storage;
         //Insert air since its a special entry (index 0)
         var airEntry = new StateEntry(0, Blocks.AIR.defaultBlockState());
         this.block2stateEntry.put(airEntry.state, airEntry);
-        this.blockId2stateEntry.add(airEntry);
+        this.blockId2stateEntry = new StateEntry[] { airEntry };
 
         this.loadFromStorage();
     }
@@ -107,10 +131,7 @@ public class Mapper {
         // SharedConstants.getGameVersion().dataVersion().id()
         // then use this to create an update path instead
 
-        long __methodStart = System.nanoTime();
-        long __dataStart = System.nanoTime();
         var mappings = this.storage.getIdMappingsData();
-        Logger.info("Mapper.getIdMappingsData took " + ((System.nanoTime() - __dataStart) / 1_000_000) + "ms");
         List<StateEntry> sentries = new ArrayList<>();
         List<BiomeEntry> bentries = new ArrayList<>();
         List<Pair<byte[], Integer>> sentryErrors = new ArrayList<>();
@@ -145,94 +166,129 @@ public class Mapper {
 
         if (!sentryErrors.isEmpty()) {
             forceResave[0] |= true;
-            //Insert garbage types into the mapping for those blocks, TODO:FIXME: Need to upgrade the type or have a solution to error blocks
-            var rand = new Random();
+            // Deterministic tombstone for undecodable persisted states. The
+            // previous behaviour substituted a RANDOM registry state per
+            // corrupted id — silent, different every launch, and capable of
+            // landing on anything (light-emitting, animated, ...). Magenta
+            // concrete is stable, visually unmistakable as "data error", and
+            // logged. Deliberately NOT inserted into block2stateEntry: a
+            // genuine magenta-concrete registration must still get its own
+            // id, and a tombstone must never satisfy a state lookup. The
+            // corrupt bytes stay on disk, so this re-detects (and re-logs)
+            // each launch rather than silently laundering the corruption.
+            var tombstone = Blocks.MAGENTA_CONCRETE.defaultBlockState();
+            Logger.error(sentryErrors.size() + " block-state id mapping(s) failed to deserialize;"
+                    + " their ids will render as magenta concrete. Voxel data referencing them was"
+                    + " created with mods or versions that can no longer be decoded.");
             for (var error : sentryErrors) {
-                while (true) {
-                    var state = new StateEntry(error.right(), Block.BLOCK_STATE_REGISTRY.byId(rand.nextInt(Block.BLOCK_STATE_REGISTRY.size() - 1)));
-                    if (this.block2stateEntry.put(state.state, state) == null) {
-                        sentries.add(state);
-                        break;
-                    }
-                }
+                sentries.add(new StateEntry(error.right(), tombstone));
             }
         }
 
-        //Insert into the arrays
-        sentries.stream().sorted(Comparator.comparing(a->a.id)).forEach(entry -> {
-            if (this.blockId2stateEntry.size() != entry.id) {
-                throw new IllegalStateException("Block entry not ordered");
-            }
-            this.blockId2stateEntry.add(entry);
-        });
+        //Insert into the arrays. Bulk-build then publish once — constructor
+        //context, no concurrent readers yet, and avoids O(n^2) grow-by-copy.
+        {
+            var blockTable = new ArrayList<StateEntry>(sentries.size() + 1);
+            blockTable.addAll(List.of(this.blockId2stateEntry)); // air entry
+            sentries.stream().sorted(Comparator.comparing(a->a.id)).forEach(entry -> {
+                if (blockTable.size() != entry.id) {
+                    throw new IllegalStateException("Block entry not ordered");
+                }
+                blockTable.add(entry);
+            });
+            this.blockId2stateEntry = blockTable.toArray(new StateEntry[0]);
 
-        bentries.stream().sorted(Comparator.comparing(a->a.id)).forEach(entry -> {
-            if (this.biomeId2biomeEntry.size() != entry.id) {
-                throw new IllegalStateException("Biome entry not ordered. got " + entry.biome + " with id " + entry.id + " expected id " + this.biomeId2biomeEntry.size());
-            }
-            this.biomeId2biomeEntry.add(entry);
-        });
+            var biomeTable = new ArrayList<BiomeEntry>(bentries.size());
+            bentries.stream().sorted(Comparator.comparing(a->a.id)).forEach(entry -> {
+                if (biomeTable.size() != entry.id) {
+                    throw new IllegalStateException("Biome entry not ordered. got " + entry.biome + " with id " + entry.id + " expected id " + biomeTable.size());
+                }
+                biomeTable.add(entry);
+            });
+            this.biomeId2biomeEntry = biomeTable.toArray(new BiomeEntry[0]);
+        }
 
         if (forceResave[0]) {
             Logger.warn("Forced state resave triggered");
             this.forceResaveStates();
         }
-
-        Logger.info("Mapper.loadFromStorage loaded " + this.blockId2stateEntry.size() + " block states, "
-                + this.biomeId2biomeEntry.size() + " biomes in "
-                + ((System.nanoTime() - __methodStart) / 1_000_000) + "ms");
     }
 
     public final int getBlockStateCount() {
-        return this.blockId2stateEntry.size();
+        return this.blockId2stateEntry.length;
     }
 
     private StateEntry registerNewBlockState(BlockState state) {
+        StateEntry entry;
         this.blockLock.lock();
-        var entry = this.block2stateEntry.get(state);
-        if (entry != null) {
+        try {
+            entry = this.block2stateEntry.get(state);
+            if (entry != null) return entry;
+
+            entry = new StateEntry(this.blockId2stateEntry.length, state);
+
+            // WRITE the mapping to storage BEFORE making the entry visible.
+            // The WAL write (putIdMapping) precedes both the in-memory
+            // publish and, transitively, any section save referencing the
+            // id — and WAL recovery replays a strict prefix, so no durable
+            // section can ever reference an id whose mapping was lost. The
+            // fsync itself is coalesced (see flushMappingsCoalesced); it
+            // bounds tail loss, not ordering.
+            byte[] serialized = entry.serialize();
+            ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
+            buffer.put(serialized);
+            buffer.rewind();
+            this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), buffer);
+            MemoryUtil.memFree(buffer);
+            this.flushMappingsCoalesced();
+
+            var oldTable = this.blockId2stateEntry;
+            var newTable = java.util.Arrays.copyOf(oldTable, oldTable.length + 1);
+            newTable[oldTable.length] = entry;
+            this.blockId2stateEntry = newTable;
+            this.block2stateEntry.put(state, entry);
+        } finally {
             this.blockLock.unlock();
-            return entry;
         }
 
-        entry = new StateEntry(this.blockId2stateEntry.size(), state);
-        this.blockId2stateEntry.add(entry);
-        this.block2stateEntry.put(state, entry);
-        this.blockLock.unlock();
-
-        byte[] serialized = entry.serialize();
-        ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
-        buffer.put(serialized);
-        buffer.rewind();
-        this.storage.putIdMapping(entry.id | (BLOCK_STATE_TYPE<<30), buffer);
-        MemoryUtil.memFree(buffer);
-        //this.storage.flush();
-
-        if (this.newStateCallback!=null)this.newStateCallback.accept(entry);
+        // Callback fires outside the lock — preserves the previous lock-
+        // holding profile and avoids stalling other registrations on
+        // downstream work (e.g. bakery requests).
+        if (this.newStateCallback!=null) this.newStateCallback.accept(entry);
         return entry;
     }
 
     private BiomeEntry registerNewBiome(String biome) {
+        BiomeEntry entry;
         this.biomeLock.lock();
-        var entry = this.biome2biomeEntry.get(biome);
-        if (entry != null) {
+        try {
+            entry = this.biome2biomeEntry.get(biome);
+            if (entry != null) return entry;
+
+            entry = new BiomeEntry(this.biomeId2biomeEntry.length, biome);
+
+            // See registerNewBlockState for the rationale: persist before
+            // publishing the in-memory entry, so a crash window cannot leave
+            // voxel data on disk referencing a biome id whose mapping was
+            // never durably written.
+            byte[] serialized = entry.serialize();
+            ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
+            buffer.put(serialized);
+            buffer.rewind();
+            this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), buffer);
+            MemoryUtil.memFree(buffer);
+            this.flushMappingsCoalesced();
+
+            var oldTable = this.biomeId2biomeEntry;
+            var newTable = java.util.Arrays.copyOf(oldTable, oldTable.length + 1);
+            newTable[oldTable.length] = entry;
+            this.biomeId2biomeEntry = newTable;
+            this.biome2biomeEntry.put(biome, entry);
+        } finally {
             this.biomeLock.unlock();
-            return entry;
         }
-        entry = new BiomeEntry(this.biomeId2biomeEntry.size(), biome);
-        this.biomeId2biomeEntry.add(entry);
-        this.biome2biomeEntry.put(biome, entry);
-        this.biomeLock.unlock();
 
-        byte[] serialized = entry.serialize();
-        ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
-        buffer.put(serialized);
-        buffer.rewind();
-        this.storage.putIdMapping(entry.id | (BIOME_TYPE<<30), buffer);
-        MemoryUtil.memFree(buffer);
-        //this.storage.flush();
-
-        if (this.newBiomeCallback!=null)this.newBiomeCallback.accept(entry);
+        if (this.newBiomeCallback!=null) this.newBiomeCallback.accept(entry);
         return entry;
     }
 
@@ -244,7 +300,13 @@ public class Mapper {
     }
 
     public BlockState getBlockStateFromBlockId(int blockId) {
-        return this.blockId2stateEntry.get(blockId).state;
+        // Synthetic multi-cell slice ids resolve to their SOURCE block's state. The
+        // single comparison is on the always-taken real-id branch in steady state.
+        if (MultiCellSliceRegistry.isSynthetic(blockId)) {
+            int src = MultiCellSliceRegistry.INSTANCE.getSlice(blockId).sourceBlockId();
+            return this.blockId2stateEntry[src].state;
+        }
+        return this.blockId2stateEntry[blockId].state;
     }
 
     public int getIdForBlockState(BlockState state) {
@@ -263,7 +325,12 @@ public class Mapper {
     }
 
     public int getBlockStateOpacity(int blockId) {
-        return this.blockId2stateEntry.get(blockId).opacity;
+        // Synthetic slices inherit their source block's opacity (used by the mip loop).
+        if (MultiCellSliceRegistry.isSynthetic(blockId)) {
+            int src = MultiCellSliceRegistry.INSTANCE.getSlice(blockId).sourceBlockId();
+            return this.blockId2stateEntry[src].opacity;
+        }
+        return this.blockId2stateEntry[blockId].opacity;
     }
 
     public int getIdForBiome(Holder<Biome> biome) {
@@ -282,36 +349,14 @@ public class Mapper {
         return (Byte.toUnsignedLong(light)<<56)|(Integer.toUnsignedLong(biomeId) << 47)|(Integer.toUnsignedLong(blockId)<<27);
     }
 
-    //TODO: fixme: synchronize access to this.blockId2stateEntry
+    // COW table: a volatile read gives an immutable snapshot; clone so the
+    // caller can't alias the live table. id == index is enforced at insert.
     public StateEntry[] getStateEntries() {
-        this.blockLock.lock();
-        var set = new ArrayList<>(this.blockId2stateEntry);
-        StateEntry[] out = new StateEntry[set.size()];
-        int i = 0;
-        for (var entry : set) {
-            if (entry.id != i++) {
-                throw new IllegalStateException();
-            }
-            out[i-1] = entry;
-        }
-        this.blockLock.unlock();
-        return out;
+        return this.blockId2stateEntry.clone();
     }
 
-    //TODO: fixme: synchronize access to this.biomeId2biomeEntry
     public BiomeEntry[] getBiomeEntries() {
-        this.biomeLock.lock();
-        var set = new ArrayList<>(this.biomeId2biomeEntry);
-        BiomeEntry[] out = new BiomeEntry[set.size()];
-        int i = 0;
-        for (var entry : set) {
-            if (entry.id != i++) {
-                throw new IllegalStateException();
-            }
-            out[i-1] = entry;
-        }
-        this.biomeLock.unlock();
-        return out;
+        return this.biomeId2biomeEntry.clone();
     }
 
     public void forceResaveStates() {
@@ -323,8 +368,8 @@ public class Mapper {
             if (entry.state.isAir() && entry.id == 0) {
                 continue;
             }
-            if (this.blockId2stateEntry.indexOf(entry) != entry.id) {
-                throw new IllegalStateException("State Id NOT THE SAME, very critically bad. arr:" + this.blockId2stateEntry.indexOf(entry) + " entry: " + entry.id);
+            if (this.blockId2stateEntry[entry.id] != entry) {
+                throw new IllegalStateException("State Id NOT THE SAME, very critically bad. entry: " + entry.id);
             }
             byte[] serialized = entry.serialize();
             ByteBuffer buffer = MemoryUtil.memAlloc(serialized.length);
@@ -335,7 +380,7 @@ public class Mapper {
         }
 
         for (var entry : biomes) {
-            if (this.biomeId2biomeEntry.indexOf(entry) != entry.id) {
+            if (this.biomeId2biomeEntry[entry.id] != entry) {
                 throw new IllegalStateException("Biome Id NOT THE SAME, very critically bad");
             }
 
@@ -366,9 +411,7 @@ public class Mapper {
             if (state.getBlock() instanceof LeavesBlock) {
                 this.opacity = 15;
             } else {
-                // 1.20.1: getLightDampening() 改名为 getLightBlock(BlockGetter, BlockPos)
-                // 实现仅返回缓存的 this.lightBlock 字段,不使用参数,可传 null
-                this.opacity = state.getLightBlock(null, null);
+                this.opacity = state.getLightBlock(net.minecraft.world.level.EmptyBlockGetter.INSTANCE, net.minecraft.core.BlockPos.ZERO);
             }
         }
 
@@ -387,31 +430,26 @@ public class Mapper {
 
         public static StateEntry deserialize(int id, byte[] data, boolean[] forceResave) {
             try {
-                // 1.20.1: NbtIo.readCompressed 只有 (InputStream) 重载,无 NbtAccounter 参数;
-                // NbtAccounter.unlimitedHeap() 改为 NbtAccounter.UNLIMITED 静态字段
                 var compound = NbtIo.readCompressed(new ByteArrayInputStream(data));
-                if ((compound.contains("id") ? compound.getInt("id") : -1) != id) {
+                if (!compound.contains("id") || compound.getInt("id") != id) {
                     throw new IllegalStateException("Encoded id != expected id");
                 }
                 var bsc = compound.getCompound("block_state");
                 var state = BlockState.CODEC.parse(NbtOps.INSTANCE, bsc);
-                // 1.20.1: DFU 6.0.8 的 DataResult 没有 isError() 和无参 getOrThrow()
-                // 用 result().isEmpty() 替代 isError(),用 result().get() 替代 getOrThrow()
-                if (state.result().isEmpty()) {
+                if (!state.result().isPresent()) {
                     Logger.info("Could not decode blockstate, attempting fixes, error: "+ state.error().get().message());
-                    // 1.20.1: WorldVersion.dataVersion() 改名为 getDataVersion(),DataVersion.version() 改名为 getVersion()
                     bsc = (CompoundTag) DataFixers.getDataFixer().update(References.BLOCK_STATE, new Dynamic<>(NbtOps.INSTANCE,bsc),0, SharedConstants.getCurrentVersion().getDataVersion().getVersion()).getValue();
                     state = BlockState.CODEC.parse(NbtOps.INSTANCE, bsc);
-                    if (state.result().isEmpty()) {
+                    if (!state.result().isPresent()) {
                         Logger.error("Could not decode blockstate setting to air. id:" + id + " error: " + state.error().get().message());
                         return new StateEntry(id, Blocks.AIR.defaultBlockState());
                     } else {
-                        Logger.info("Fixed blockstate to: " + state.result().get());
+                        Logger.info("Fixed blockstate to: " + state.result().orElseThrow());
                         forceResave[0] |= true;
-                        return new StateEntry(id, state.result().get());
+                        return new StateEntry(id, state.result().orElseThrow());
                     }
                 } else {
-                    return new StateEntry(id, state.result().get());
+                    return new StateEntry(id, state.result().orElseThrow());
                 }
             } catch (IOException e) {
                 throw new RuntimeException(e);
@@ -443,12 +481,11 @@ public class Mapper {
 
         public static BiomeEntry deserialize(int id, byte[] data) {
             try {
-                // 1.20.1: NbtIo.readCompressed 只有 (InputStream) 重载,无 NbtAccounter 参数
                 var compound = NbtIo.readCompressed(new ByteArrayInputStream(data));
-                if ((compound.contains("id") ? compound.getInt("id") : -1) != id) {
+                if (!compound.contains("id") || compound.getInt("id") != id) {
                     throw new IllegalStateException("Encoded id != expected id");
                 }
-                String biome = compound.contains("biome_id") ? compound.getString("biome_id") : null;
+                String biome = compound.getString("biome_id");
                 return new BiomeEntry(id, biome);
             } catch (IOException e) {
                 throw new RuntimeException(e);

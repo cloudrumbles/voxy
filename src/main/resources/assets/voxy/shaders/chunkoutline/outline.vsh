@@ -1,7 +1,5 @@
 #version 460
 
-#import <voxy:util/depthutils.glsl>
-
 layout(binding = 0, std140) uniform SceneUniform {
     mat4 MVP;
     ivec4 cameraBlockPos;
@@ -43,16 +41,9 @@ void main() {
     //TODO: make it W.R.T world height and offsets
     //cubeCornerI.y = cubeCornerI.y*1024-512;
     gl_Position = MVP * vec4(vec3(cubeCornerI+origin), 1);
-
-    //TODO: FIXME with reverse z need tobe + not -
-    gl_Position.z += CLOSER_SIGN*0.0005f;//Bring closer to camera
+    gl_Position.z -= 0.0005f;
 
     #ifdef TAA
     gl_Position.xy += getTAA()*gl_Position.w;//Apply TAA if we have it
     #endif
 }
-
-
-
-//Undefine depth stuff
-#import <voxy:util/depthutils.glsl>

@@ -1,7 +1,6 @@
 package me.cortex.voxy.common.config.storage.rocksdb;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.config.ConfigBuildCtx;
 import me.cortex.voxy.common.config.storage.StorageBackend;
 import me.cortex.voxy.common.config.storage.StorageConfig;
@@ -12,8 +11,6 @@ import org.lwjgl.system.MemoryUtil;
 import org.rocksdb.*;
 
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -30,20 +27,7 @@ public class RocksDBStorageBackend extends StorageBackend {
     private final List<AbstractImmutableNativeReference> closeList = new ArrayList<>();
 
     public RocksDBStorageBackend(String path) {
-        // 1.20.1 移植:清理上次异常退出可能遗留的 RocksDB LOCK 文件,
-        // 避免 RocksDB.open 因锁冲突失败或阻塞。原逻辑被注释,此处恢复。
-        Path lockPath = Path.of(path).resolve("LOCK");
-        if (Files.exists(lockPath)) {
-            Logger.warn("Found leftover RocksDB LOCK file at " + lockPath + ", deleting (previous session may have crashed)");
-            try {
-                Files.delete(lockPath);
-            } catch (Exception e) {
-                Logger.error("Failed to delete leftover RocksDB LOCK file: " + lockPath, e);
-            }
-        }
-        long __loadStart = System.nanoTime();
         RocksDB.loadLibrary();
-        Logger.info("RocksDB.loadLibrary took " + ((System.nanoTime() - __loadStart) / 1_000_000) + "ms");
 
         //TODO: FIXME: DONT USE THE SAME options PER COLUMN FAMILY
         final ColumnFamilyOptions cfOpts = new ColumnFamilyOptions()
@@ -56,8 +40,7 @@ public class RocksDBStorageBackend extends StorageBackend {
                 .setLevelCompactionDynamicLevelBytes(true)
                 .optimizeForPointLookup(128);
 
-        // 1.20.1 rocksdbjni 7.10.2 没有 HyperClockCache,用 ClockCache 替代 (构造器不同)
-        var bCache = new ClockCache(128*1024L*1024L, 4, false);
+        var bCache = new HyperClockCache(128*1024L*1024L,0, 4, false);
         var filter = new BloomFilter(10);
         cfWorldSecOpts.setTableFormatConfig(new BlockBasedTableConfig()
                 .setCacheIndexAndFilterBlocksWithHighPriority(true)
@@ -85,16 +68,15 @@ public class RocksDBStorageBackend extends StorageBackend {
         List<ColumnFamilyHandle> handles = new ArrayList<>();
 
         try {
-
-            long __openStart = System.nanoTime();
             this.db = RocksDB.open(options,
                     path, cfDescriptors,
                     handles);
-            Logger.info("RocksDB.open took " + ((System.nanoTime() - __openStart) / 1_000_000) + "ms for path: " + path);
 
             this.sectionReadOps = new ReadOptions();
             this.sectionWriteOps = new WriteOptions();
 
+            this.closeList.addAll(handles);
+            this.closeList.add(this.db);
             this.closeList.add(options);
             this.closeList.add(cfOpts);
             this.closeList.add(cfWorldSecOpts);
@@ -102,7 +84,6 @@ public class RocksDBStorageBackend extends StorageBackend {
             this.closeList.add(this.sectionWriteOps);
             this.closeList.add(filter);
             this.closeList.add(bCache);
-            this.closeList.addAll(handles);
 
             this.worldSections = handles.get(1);
             this.idMappings = handles.get(2);
@@ -116,29 +97,28 @@ public class RocksDBStorageBackend extends StorageBackend {
     @Override
     public void iteratePositions(int level, LongConsumer consumer) {
         try (var stack = MemoryStack.stackPush()) {
-            try (var iter = this.db.newIterator(this.worldSections, this.sectionReadOps)) {
-                ByteBuffer keyBuff = stack.calloc(8);
-                long keyBuffPtr = MemoryUtil.memAddress(keyBuff);
-                //TODO: this can be optimized if needed by useing a prefix-seek https://github.com/facebook/rocksdb/wiki/Prefix-Seek
-
-                if (level != -1) {//-1 means iterate all
-                    var seekBuff = stack.calloc(8);
-                    MemoryUtil.memPutLong(MemoryUtil.memAddress(seekBuff), Long.reverseBytes(Integer.toUnsignedLong(level) << 60));
-                    iter.seek(seekBuff);//we seak to the first level
-                } else {
-                    iter.seekToFirst();
-                }
-                while (iter.isValid()) {
-                    keyBuff.clear();
-                    iter.key(keyBuff);
-                    long key = Long.reverseBytes(MemoryUtil.memGetLong(keyBuffPtr));
-                    if (level != -1 && WorldEngine.getLevel(key) != level) {
-                        break;
-                    }
-                    consumer.accept(key);
-                    iter.next();
-                }
+            ByteBuffer keyBuff = stack.calloc(8);
+            long keyBuffPtr = MemoryUtil.memAddress(keyBuff);
+            //TODO: this can be optimized if needed by useing a prefix-seek https://github.com/facebook/rocksdb/wiki/Prefix-Seek
+            var iter = this.db.newIterator(this.worldSections, this.sectionReadOps);
+            if (level!=-1) {//-1 means iterate all
+                var seekBuff = stack.calloc(8);
+                MemoryUtil.memPutLong(MemoryUtil.memAddress(seekBuff), Long.reverseBytes(Integer.toUnsignedLong(level)<<60));
+                iter.seek(seekBuff);//we seak to the first level
+            } else {
+                iter.seekToFirst();
             }
+            while (iter.isValid()) {
+                keyBuff.clear();
+                iter.key(keyBuff);
+                long key = Long.reverseBytes(MemoryUtil.memGetLong(keyBuffPtr));
+                if (level!=-1 && WorldEngine.getLevel(key) != level) {
+                    break;
+                }
+                consumer.accept(key);
+                iter.next();
+            }
+            iter.close();
         }
     }
 
@@ -149,7 +129,7 @@ public class RocksDBStorageBackend extends StorageBackend {
             //HATE JAVA HATE JAVA HATE JAVA, Long.reverseBytes()
             //THIS WILL ONLY WORK ON LITTLE ENDIAN SYSTEM AAAAAAAAA ;-;
 
-            MemoryUtil.memPutLong(MemoryUtil.memAddress(buffer), Long.reverseBytes(swizzlePos(key)));
+            MemoryUtil.memPutLong(MemoryUtil.memAddress(buffer), Long.reverseBytes(key));
 
             var result = this.db.get(this.worldSections,
                     this.sectionReadOps,
@@ -167,10 +147,26 @@ public class RocksDBStorageBackend extends StorageBackend {
     }
 
     @Override
+    public boolean containsSectionData(long key) {
+        // Skip the compression-adaptor decompression path: do a direct RocksDB
+        // get with a 1-byte value buffer. We don't care about the value bytes,
+        // only whether the key exists. NOT_FOUND vs any size answers exactly.
+        try (var stack = MemoryStack.stackPush()) {
+            var keyBuf = stack.malloc(8);
+            var valBuf = stack.malloc(1);
+            MemoryUtil.memPutLong(MemoryUtil.memAddress(keyBuf), Long.reverseBytes(key));
+            int result = this.db.get(this.worldSections, this.sectionReadOps, keyBuf, valBuf);
+            return result != RocksDB.NOT_FOUND;
+        } catch (RocksDBException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public void setSectionData(long key, MemoryBuffer data) {
         try (var stack = MemoryStack.stackPush()) {
             var keyBuff = stack.calloc(8);
-            MemoryUtil.memPutLong(MemoryUtil.memAddress(keyBuff), Long.reverseBytes(swizzlePos(key)));
+            MemoryUtil.memPutLong(MemoryUtil.memAddress(keyBuff), Long.reverseBytes(key));
             this.db.put(this.worldSections, this.sectionWriteOps, keyBuff, data.asByteBuffer());
         } catch (RocksDBException e) {
             throw new RuntimeException(e);
@@ -180,7 +176,7 @@ public class RocksDBStorageBackend extends StorageBackend {
     @Override
     public void deleteSectionData(long key) {
         try {
-            this.db.delete(this.worldSections, longToBytes(swizzlePos(key)));
+            this.db.delete(this.worldSections, longToBytes(key));
         } catch (RocksDBException e) {
             throw new RuntimeException(e);
         }
@@ -201,11 +197,10 @@ public class RocksDBStorageBackend extends StorageBackend {
 
     @Override
     public Int2ObjectOpenHashMap<byte[]> getIdMappingsData() {
+        var iterator = this.db.newIterator(this.idMappings);
         var out = new Int2ObjectOpenHashMap<byte[]>();
-        try (var iterator = this.db.newIterator(this.idMappings)) {
-            for (iterator.seekToFirst(); iterator.isValid(); iterator.next()) {
-                out.put(bytesToInt(iterator.key()), iterator.value());
-            }
+        for (iterator.seekToFirst(); iterator.isValid(); iterator.next()) {
+            out.put(bytesToInt(iterator.key()), iterator.value());
         }
         return out;
     }
@@ -222,13 +217,7 @@ public class RocksDBStorageBackend extends StorageBackend {
     @Override
     public void close() {
         this.flush();
-        //this.db.cancelAllBackgroundWork(true);//Rocksdb does this automatically (afak)
         this.closeList.forEach(AbstractImmutableNativeReference::close);
-        try {
-            this.db.closeE();
-        } catch (RocksDBException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     private static byte[] intToBytes(int i) {
@@ -267,9 +256,4 @@ public class RocksDBStorageBackend extends StorageBackend {
         }
     }
 
-    private static long swizzlePos(long key) {
-        // 1.20.1: Java 17 没有 Long.expand,且原代码 if(true) return key; 永远不会执行后续逻辑,
-        // 因此直接返回 key,删除死代码以避免编译错误。
-        return key;
-    }
 }

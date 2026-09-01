@@ -1,0 +1,97 @@
+#version 460 core
+
+// Produces up to 5 successive HiZ mip levels from srcLod in a single
+// dispatch. Each 16x16 workgroup covers a 32x32 region of the source level
+// and reduces it through shared memory: 16x16 of srcLod+1, 8x8 of srcLod+2,
+// ... 1x1 of srcLod+5. The per-2x2 reduction replicates hiz/blit.fsh exactly
+// (max with the any-sky patch), so the resulting pyramid is value-equivalent
+// to the fragment-pass builder's, level for level.
+//
+// outLevels is a uniform, so the early loop exit is uniform control flow and
+// every invocation reaches each barrier() together.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2D pyramid;
+
+layout(binding = 1, r32f) uniform restrict writeonly image2D dstMip1;
+layout(binding = 2, r32f) uniform restrict writeonly image2D dstMip2;
+layout(binding = 3, r32f) uniform restrict writeonly image2D dstMip3;
+layout(binding = 4, r32f) uniform restrict writeonly image2D dstMip4;
+layout(binding = 5, r32f) uniform restrict writeonly image2D dstMip5;
+
+layout(location = 0) uniform int srcLod;
+layout(location = 1) uniform int outLevels;
+layout(location = 2) uniform ivec2 srcSize;
+
+// 16x16 + 8x8 + 4x4 + 2x2 + 1x1 levels of the workgroup-local reduction
+// tree (the final 1x1 is written but never read; it keeps the loop uniform).
+shared float tile[256 + 64 + 16 + 4 + 1];
+
+float reduce(vec4 depths) {
+    bvec4 cv = lessThanEqual(vec4(0.999999999f), depths);
+    if (any(cv)) {
+        depths = mix(vec4(0.0f), depths, cv);
+    }
+    return max(max(depths.x, depths.y), max(depths.z, depths.w));
+}
+
+// Clamped fetch == CLAMP_TO_EDGE, matching the fragment builder's sampler.
+float fetchSrc(ivec2 pos) {
+    return texelFetch(pyramid, clamp(pos, ivec2(0), srcSize - 1), srcLod).r;
+}
+
+void storeLevel(int lvl, ivec2 pos, float value) {
+    if      (lvl == 1) imageStore(dstMip1, pos, vec4(value));
+    else if (lvl == 2) imageStore(dstMip2, pos, vec4(value));
+    else if (lvl == 3) imageStore(dstMip3, pos, vec4(value));
+    else if (lvl == 4) imageStore(dstMip4, pos, vec4(value));
+    else               imageStore(dstMip5, pos, vec4(value));
+}
+
+void main() {
+    ivec2 local = ivec2(gl_LocalInvocationID.xy);
+    ivec2 group = ivec2(gl_WorkGroupID.xy);
+
+    // Level srcLod+1: each thread reduces a 2x2 of the source level.
+    ivec2 outPos = group * 16 + local;
+    ivec2 srcPos = outPos * 2;
+    float value = reduce(vec4(
+        fetchSrc(srcPos),
+        fetchSrc(srcPos + ivec2(1, 0)),
+        fetchSrc(srcPos + ivec2(0, 1)),
+        fetchSrc(srcPos + ivec2(1, 1))
+    ));
+    tile[local.y * 16 + local.x] = value;
+    ivec2 levelDim = max(srcSize >> 1, ivec2(1));
+    if (all(lessThan(outPos, levelDim))) {
+        storeLevel(1, outPos, value);
+    }
+
+    int inOffset = 0;
+    int inWidth = 16;
+    int outOffset = 256;
+    for (int lvl = 2; lvl <= 5; lvl++) {
+        if (lvl > outLevels) return; // uniform exit, see header
+        memoryBarrierShared();
+        barrier();
+        int w = inWidth >> 1;
+        levelDim = max(srcSize >> lvl, ivec2(1));
+        if (local.x < w && local.y < w) {
+            float r = reduce(vec4(
+                tile[inOffset + (local.y * 2    ) * inWidth + local.x * 2    ],
+                tile[inOffset + (local.y * 2    ) * inWidth + local.x * 2 + 1],
+                tile[inOffset + (local.y * 2 + 1) * inWidth + local.x * 2    ],
+                tile[inOffset + (local.y * 2 + 1) * inWidth + local.x * 2 + 1]
+            ));
+            tile[outOffset + local.y * w + local.x] = r;
+            ivec2 pos = group * w + local;
+            if (all(lessThan(pos, levelDim))) {
+                storeLevel(lvl, pos, r);
+            }
+        }
+        inOffset = outOffset;
+        inWidth = w;
+        outOffset += w * w;
+    }
+}

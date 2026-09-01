@@ -3,21 +3,36 @@
   "minVersion": "0.8",
   "package": "me.cortex.voxy.client.mixin",
   "compatibilityLevel": "JAVA_17",
-  "refmap": "client.voxy.refmap.json",
+  "plugin": "me.cortex.voxy.client.mixin.VoxyMixinPlugin",
   "client": [
+    "iris.CustomUniformsAccessor",
+    "iris.IrisRenderingPipelineAccessor",
+    "iris.MixinIris",
+    "iris.MixinIrisRenderingPipeline",
+    "iris.MixinIrisSamplers",
+    "iris.MixinLevelRenderer",
+    "iris.MixinMatrixUniforms",
+    "iris.MixinProgramSet",
+    "iris.MixinShaderPackSourceNames",
+    "iris.MixinStandardMacros",
     "minecraft.MixinClientChunkCache",
     "minecraft.MixinClientLevel",
+    "minecraft.MixinClientPacketListener",
     "minecraft.MixinFogRenderer",
+    "minecraft.MixinLayerLightSectionStorage",
     "minecraft.MixinLevelRenderer",
-    "minecraft.session.MixinClientPacketListener",
-    "minecraft.session.MixinMinecraft",
-    "minecraft.util.MixinGPUSelect",
-    "minecraft.MixinWorld"
+    "minecraft.MixinMinecraft",
+    "minecraft.MixinRenderSystem",
+    "minecraft.MixinStairBlock",
+    "minecraft.MixinWindow",
+    "sodium.AccessorChunkTracker",
+    "sodium.AccessorSodiumWorldRenderer",
+    "sodium.MixinChunkJobQueue",
+    "sodium.MixinDefaultChunkRenderer",
+    "sodium.MixinRenderSectionManager",
+    "sodium.MixinSodiumWorldRenderer"
   ],
   "injectors": {
     "defaultRequire": 1
-  },
-  "overwrites": {
-    "requireAnnotations": true
   }
 }

@@ -1,6 +1,7 @@
 package me.cortex.voxy.common.world;
 
 
+import me.cortex.voxy.common.world.other.Mapper;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 
 import java.lang.invoke.MethodHandles;
@@ -41,6 +42,20 @@ public final class WorldSection {
     private static final AtomicInteger ARRAY_REUSE_CACHE_COUNT = new AtomicInteger(0);
     private static final ConcurrentLinkedDeque<long[]> ARRAY_REUSE_CACHE = new ConcurrentLinkedDeque<>();
 
+    // Parallel pool for arrays known to be filled with AIR_FILL_VALUE. Air-only
+    // sections (sky-space above terrain, void below bedrock) are common enough
+    // that recycling already-air-filled arrays here lets us skip the 256 KB
+    // Arrays.fill the air-load path would otherwise pay every time.
+    private static final int AIR_REUSE_CACHE_SIZE = 400;
+    private static final AtomicInteger AIR_REUSE_CACHE_COUNT = new AtomicInteger(0);
+    private static final ConcurrentLinkedDeque<long[]> AIR_REUSE_CACHE = new ConcurrentLinkedDeque<>();
+
+    // Specific long value the air-load path fills with: sky-light 15, block 0,
+    // biome 0. Matches what ActiveSectionTracker writes at the air-fill site.
+    // The AIR_REUSE_CACHE invariant is that every long in a cached array
+    // equals exactly this value.
+    public static final long AIR_FILL_VALUE = Mapper.composeMappingId((byte) 15, 0, 0);
+
 
     public final int lvl;
     public final int x;
@@ -54,6 +69,15 @@ public final class WorldSection {
     long[] data = null;
     volatile int nonEmptyBlockCount = 0;//Note: only needed for level 0 sections
     volatile byte nonEmptyChildren;
+
+    // True iff this.data is entirely filled with AIR_FILL_VALUE. Maintained
+    // conservatively: set by the air-load path; cleared by any write site.
+    // Used to (a) skip the Arrays.fill in fillWithAir when the array is
+    // already in the canonical air state, and (b) route the array to
+    // AIR_REUSE_CACHE on release so the next air-load can reuse it without
+    // refilling. Volatile for cross-thread visibility on the rare path where
+    // a section is observed mid-load.
+    volatile boolean dataIsKnownAir = false;
 
     final ActiveSectionTracker tracker;
     volatile boolean inSaveQueue;
@@ -71,12 +95,58 @@ public final class WorldSection {
         this.key = WorldEngine.getWorldSectionId(lvl, x, y, z);
         this.tracker = tracker;
 
+        // Prefer the dirty pool: most sections are loaded with real (non-air)
+        // data and will overwrite the array contents anyway, so spending an
+        // air-pool array here would be wasteful. The air pool is consulted by
+        // fillWithAir() when the air-load path actually needs a clean array.
         this.data = ARRAY_REUSE_CACHE.poll();
-        if (this.data == null) {
-            this.data = new long[32 * 32 * 32];
-        } else {
+        if (this.data != null) {
             ARRAY_REUSE_CACHE_COUNT.decrementAndGet();
+        } else {
+            this.data = AIR_REUSE_CACHE.poll();
+            if (this.data != null) {
+                AIR_REUSE_CACHE_COUNT.decrementAndGet();
+                this.dataIsKnownAir = true;
+            } else {
+                this.data = new long[32 * 32 * 32];
+                // Freshly allocated long[] is zero-filled, not
+                // AIR_FILL_VALUE-filled, so dataIsKnownAir stays false.
+            }
         }
+    }
+
+    // Air-load path: ensure this.data is filled with AIR_FILL_VALUE. Tries to
+    // swap in an already-air-filled array from AIR_REUSE_CACHE first (zero
+    // memory writes); falls back to a 256 KB Arrays.fill of the current
+    // array. Idempotent: returns immediately if dataIsKnownAir is already
+    // true. Called from the section tracker's air-fill site.
+    public void fillWithAir() {
+        if (this.dataIsKnownAir) {
+            return;
+        }
+        long[] clean = AIR_REUSE_CACHE.poll();
+        if (clean != null) {
+            AIR_REUSE_CACHE_COUNT.decrementAndGet();
+            long[] dirty = this.data;
+            this.data = clean;
+            // Return the dirty array to the regular pool so it's recycled
+            // rather than discarded. If the regular pool is full, drop it
+            // -- net cache occupancy stays bounded.
+            if (ARRAY_REUSE_CACHE_COUNT.get() < ARRAY_REUSE_CACHE_SIZE) {
+                ARRAY_REUSE_CACHE.add(dirty);
+                ARRAY_REUSE_CACHE_COUNT.incrementAndGet();
+            }
+        } else {
+            Arrays.fill(this.data, AIR_FILL_VALUE);
+        }
+        this.dataIsKnownAir = true;
+    }
+
+    // Called by external writers (SaveLoadSystem3.deserialize,
+    // WorldUpdater.insertSectionLvlIntoWorld, error-path Arrays.fills) after
+    // mutating this.data so the cache-routing on release is correct.
+    public void markDataDirty() {
+        this.dataIsKnownAir = false;
     }
 
     void primeForReuse() {
@@ -131,18 +201,12 @@ public final class WorldSection {
         return ((int)ATOMIC_STATE_HANDLE.get(this))>>1;
     }
 
+    //TODO: add the ability to hint to the tracker that yes the section is unloaded, try to cache it in a secondary cache since it will be reused/needed later
     public int release() {
-        return release(true, 0);
+        return release(true);
     }
 
-
-    public static int RELEASE_HINT_POSSIBLE_REUSE = 1;
-    //Unload but specify possible reuse hints
-    public int release(int hints) {
-        return release(true, hints);
-    }
-
-    int release(boolean unload, int hints) {
+    int release(boolean unload) {
         int state = ((int) ATOMIC_STATE_HANDLE.getAndAdd(this, -2)) - 2;
         if (state < 1) {
             throw new IllegalStateException("Section got into an invalid state");
@@ -152,7 +216,7 @@ public final class WorldSection {
         }
         if ((state>>1)==0 && unload) {
             if (this.tracker != null) {
-                this.tracker.tryUnload(this, hints);
+                this.tracker.tryUnload(this);
             } else {
                 //This should _ONLY_ ever happen when its an untracked section
                 // If it is, try release it
@@ -171,7 +235,7 @@ public final class WorldSection {
             throw new IllegalStateException("Section marked as free but has refs");
         }
         if (witness == 1 && (this.isDirty || this.inSaveQueue)) {
-            throw new IllegalStateException("Section freed while marked as dirty or in the save queue: " + (this.isDirty?"dirty, ":"") + (this.inSaveQueue?"saveQueue":""));
+            throw new IllegalStateException("Section freed while marked as dirty or in the save queue");
         }
         return witness == 1;
     }
@@ -180,11 +244,22 @@ public final class WorldSection {
         if (VERIFY_WORLD_SECTION_EXECUTION && this.data == null) {
             throw new IllegalStateException();
         }
-        if (ARRAY_REUSE_CACHE_COUNT.get() < ARRAY_REUSE_CACHE_SIZE) {
-            ARRAY_REUSE_CACHE.add(this.data);
-            ARRAY_REUSE_CACHE_COUNT.incrementAndGet();
+        // Route by content state: air-filled arrays go to the air pool so the
+        // next air-load can reuse them without refilling; everything else
+        // goes to the regular dirty pool.
+        if (this.dataIsKnownAir) {
+            if (AIR_REUSE_CACHE_COUNT.get() < AIR_REUSE_CACHE_SIZE) {
+                AIR_REUSE_CACHE.add(this.data);
+                AIR_REUSE_CACHE_COUNT.incrementAndGet();
+            }
+        } else {
+            if (ARRAY_REUSE_CACHE_COUNT.get() < ARRAY_REUSE_CACHE_SIZE) {
+                ARRAY_REUSE_CACHE.add(this.data);
+                ARRAY_REUSE_CACHE_COUNT.incrementAndGet();
+            }
         }
         this.data = null;
+        this.dataIsKnownAir = false;
     }
 
 
@@ -211,6 +286,9 @@ public final class WorldSection {
         int idx = getIndex(x,y,z);
         long old = this.data[idx];
         this.data[idx] = id;
+        // Conservative: any write invalidates the "all AIR_FILL_VALUE" invariant
+        // even if `id` happens to equal it (other slots may already differ).
+        this.dataIsKnownAir = false;
         return old;
     }
 
@@ -288,22 +366,16 @@ public final class WorldSection {
         return new WorldSection(lvl, x, y, z, null);
     }
 
-    public void markDirty() {
-        IS_DIRTY_HANDLE.getAndSet(this, true);
-    }
-
-
     public boolean exchangeIsInSaveQueue(boolean state) {
         return ((boolean) IN_SAVE_QUEUE_HANDLE.compareAndExchange(this, !state, state)) == !state;
     }
 
-    //Should only be called by the saving service
-    public boolean setNotDirty() {
-        return (boolean) IS_DIRTY_HANDLE.getAndSet(this, false);
+    public void markDirty() {
+        IS_DIRTY_HANDLE.getAndSet(this, true);
     }
 
-    public boolean shouldSave() {
-        return this.isDirty&&!this.inSaveQueue;
+    public boolean setNotDirty() {
+        return (boolean) IS_DIRTY_HANDLE.getAndSet(this, false);
     }
 
     public boolean isFreed() {

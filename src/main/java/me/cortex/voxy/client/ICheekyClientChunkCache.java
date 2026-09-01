@@ -1,8 +1,7 @@
 package me.cortex.voxy.client;
 
 import net.minecraft.world.level.chunk.LevelChunk;
-
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 public interface ICheekyClientChunkCache {
     @Nullable

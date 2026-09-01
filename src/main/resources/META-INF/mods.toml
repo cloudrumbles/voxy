@@ -1,32 +1,32 @@
 modLoader = "javafml"
-loaderVersion = "${loader_version_range}"
+loaderVersion = "[43,)"
 license = "All-Rights-Reserved"
-issueTrackerURL = "https://github.com/MCRcortex/voxy/issues"
 
 [[mods]]
 modId = "voxy"
-version = "${mod_version}"
+version = "${version}"
 displayName = "Voxy"
+description = "Far distance rendering mod utilising LoDs"
 authors = "Cortex"
-description = '''
-Far distance rendering mod utilising LoDs.
-Backported to Forge 1.19.2 with parity tests for stable core behaviour.
-'''
+logoFile = "assets/voxy/icon.png"
 
 [[dependencies.voxy]]
-    modId = "forge"
-    mandatory = true
-    versionRange = "${forge_version_range}"
-    ordering = "NONE"
-    side = "BOTH"
+modId = "forge"
+mandatory = true
+versionRange = "[43,)"
+ordering = "NONE"
+side = "BOTH"
 
 [[dependencies.voxy]]
-    modId = "minecraft"
-    mandatory = true
-    versionRange = "${minecraft_version_range}"
-    ordering = "NONE"
-    side = "BOTH"
+modId = "minecraft"
+mandatory = true
+versionRange = "[1.19.2,1.20)"
+ordering = "NONE"
+side = "BOTH"
 
-# Forge 1.20.1 自带 Mixin 引导,这里声明 mixin 配置文件
-[[mixins]]
-    config = "client.voxy.mixins.json"
+[[dependencies.voxy]]
+modId = "embeddium"
+mandatory = true
+versionRange = "[0.3,)"
+ordering = "AFTER"
+side = "CLIENT"

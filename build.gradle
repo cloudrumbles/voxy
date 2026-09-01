@@ -1,210 +1,279 @@
-buildscript {
-    repositories {
-        // 优先使用本地 maven 仓库 (ForgeGradle 及其依赖已通过 curl 预下载到 ~/.m2/repository/,
-        // 因为 maven.minecraftforge.net 通过 gradle HTTP client 时偶发连接超时)
-        mavenLocal()
-        // 用国内镜像替代 maven central,因为沙箱中 gradle 直连 repo.maven.apache.org 偶发超时
-        maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
-        maven { url = 'https://mirrors.cloud.tencent.com/maven/' }
-        mavenCentral()
-        gradlePluginPortal()
-        maven { url = 'https://maven.minecraftforge.net/' }
-    }
-    dependencies {
-        // ForgeGradle 6.0.x 在 forge maven 上有完整 jar 但无 plugin marker,
-        // 因此用 buildscript classpath 而不是 plugins{} DSL
-        classpath 'net.minecraftforge.gradle:ForgeGradle:6.0.54'
-        // MixinGradle 插件,用于生成 Forge 运行期 SRG 映射所需的 refmap
-        classpath 'org.spongepowered:mixingradle:0.7.+'
-    }
-}
-
 plugins {
+    id 'dev.architectury.loom' version '1.4-SNAPSHOT'
     id 'maven-publish'
+    // Used to relocate net.jpountz.* (lz4-java) into a voxy-private package
+    // path. Without this, the bundled lz4 collides with other Forge mods that
+    // also ship lz4 (e.g. chisels-and-bits via scena's JIJ'd lz4-pure-java) —
+    // JPMS forbids package overlap across modules in one ModuleLayer and the
+    // game silent-exits during ModLauncher class-transform.
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
-apply plugin: 'net.minecraftforge.gradle'
-// Mixin Gradle 插件需要在 ForgeGradle 应用后应用,因为它依赖 minecraft/patcher 扩展
-apply plugin: 'org.spongepowered.mixin'
+def isInGHA = System.getenv("GITHUB_ACTIONS") == "true"
 
 version = project.mod_version
 group = project.maven_group
+
 base {
     archivesName = project.archives_base_name
 }
 
-// Mojang 官方 mappings (Parchment plugin 需要额外的 librarian 依赖,沙箱中无法稳定下载,故用 official)
-minecraft {
-    mappings channel: 'official', version: "${minecraft_version}"
-    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+loom {
+    silentMojangMappingsLicense()
+    accessWidenerPath = file("src/main/resources/voxy.accesswidener")
 
-    runs {
-        client {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'debug'
-            // 容器环境(cgroup v2)下 Java 17.0.x 读取 cgroup 时可能 NPE,
-            // 禁用容器支持绕过该问题,不影响游戏逻辑
-            jvmArgs '-XX:-UseContainerSupport'
-            mods {
-                voxy {
-                    source sourceSets.main
-                }
-            }
-        }
-        server {
-            workingDirectory project.file('run')
-            property 'forge.logging.markers', 'REGISTRIES'
-            property 'forge.logging.console.level', 'debug'
-            mods {
-                voxy {
-                    source sourceSets.main
-                }
-            }
-        }
+    forge {
+        convertAccessWideners = true
+        mixinConfigs = [
+                "client.voxy.mixins.json",
+                "common.voxy.mixins.json"
+        ]
     }
 }
 
 repositories {
-    mavenLocal()
-    maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
-    maven { url = 'https://mirrors.cloud.tencent.com/maven/' }
+    maven {
+        name = "Modrinth"
+        url = "https://api.modrinth.com/maven"
+        content {
+            includeGroup "maven.modrinth"
+        }
+    }
     mavenCentral()
-    maven { url = 'https://maven.minecraftforge.net/' }
-    // Parchment mappings 仓库
-    maven { url = 'https://maven.parchmentmc.org/' }
+    maven { url = "https://www.cursemaven.com" }
+}
+
+
+def gitCommitHash = { ->
+    try {
+        def stdout = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-parse', '--short', 'HEAD'
+            standardOutput = stdout
+            ignoreExitValue = true
+        }
+        return stdout.toString().trim() ?: "<UnknownCommit>"
+    } catch (Exception e) {
+        return "<UnknownCommit>"
+    }
+}
+
+def buildtime = { System.currentTimeMillis() / 1000L }
+
+processResources {
+    def time = buildtime()
+    def hash = gitCommitHash()
+    def ver = project.version
+
+    inputs.properties("version": ver, "commit": hash, "buildtime": time)
+    filesMatching("META-INF/mods.toml") {
+        expand "version": ver, "commit": hash, "buildtime": time
+    }
 }
 
 dependencies {
-    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    forge "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"
 
-    // 仅编译期依赖,运行期需要用户自己装 Forge 版的 Sodium/Iris (Rubidium/Embeddium + Oculus)
-    // 由于这些 mod 的 1.20.1 内部 API 与源版本完全不同,本移植禁用了所有对它们的直接 mixin 集成
+    testImplementation platform("org.junit:junit-bom:5.10.3")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 
-    // 原生库 (RocksDB / LMDB / zstd / Jedis / LZ4 / XZ / SQLite)
-    // 使用 Forge 的 JarJar 机制打包到 mod jar 里
-    // 注意: Forge JarJar 要求版本范围格式 (Maven range),不能直接用纯版本号
-    // 同时用 implementation 保证在编译类路径上,jarJar 保证打包进 jar
-    //
-    // ⚠️ lwjgl 核心 (org.lwjgl:lwjgl) 不能 jarJar 内嵌: MC 1.20.1 自带 LWJGL 3.3.1,
-    //    内嵌会导致 JPMS split package 冲突 (Modules lwjgl and org.lwjgl export package ...)。
-    //    只内嵌 MC 不提供的子模块 lwjgl-lmdb 和 lwjgl-zstd。
-    //    lwjgl 核心用 compileOnly 保证编译期可用,运行期由 MC 提供。
-    compileOnly 'org.lwjgl:lwjgl:3.3.1'
-    compileOnly 'org.lwjgl:lwjgl-lmdb:3.3.1'
-    compileOnly 'org.lwjgl:lwjgl-zstd:3.3.1'
-    // jarJar 打包 lwjgl 子模块,排除 lwjgl 核心传递依赖 (MC 自带,内嵌会导致 split package)
-    jarJar(implementation('org.lwjgl:lwjgl-lmdb:[3.3.1,4.0)')) {
-        exclude group: 'org.lwjgl', module: 'lwjgl'
-        version { strictly '[3.3.1,4.0)'; prefer '3.3.1' }
-    }
-    jarJar(implementation('org.lwjgl:lwjgl-zstd:[3.3.1,4.0)')) {
-        exclude group: 'org.lwjgl', module: 'lwjgl'
-        version { strictly '[3.3.1,4.0)'; prefer '3.3.1' }
-    }
-    jarJar(implementation('org.rocksdb:rocksdbjni:[7.10.2,8.0)')) {
-        version { strictly '[7.10.2,8.0)'; prefer '7.10.2' }
-    }
-    jarJar(implementation('redis.clients:jedis:[5.1.0,6.0)')) {
-        version { strictly '[5.1.0,6.0)'; prefer '5.1.0' }
-    }
-    jarJar(implementation('org.apache.commons:commons-pool2:[2.12.0,3.0)')) {
-        version { strictly '[2.12.0,3.0)'; prefer '2.12.0' }
-    }
-    // lz4-java: Forge 1.20.1 自带 at.yawk.lz4:lz4-java (提供 org.lz4:lz4-java capability),
-    // 与 org.lz4:lz4-java 冲突。由于 API 兼容 (都用 net.jpountz.lz4 包),
-    // 改用 at.yawk.lz4:lz4-java 避免冲突,并 jarJar 打包运行时。
-    jarJar(implementation('at.yawk.lz4:lz4-java:[1.8.1,2.0)')) {
-        version { strictly '[1.8.1,2.0)'; prefer '1.8.1' }
-    }
-    jarJar(implementation('org.tukaani:xz:[1.10,2.0)')) {
-        version { strictly '[1.10,2.0)'; prefer '1.10' }
-    }
-    jarJar(implementation('org.xerial:sqlite-jdbc:[3.42.0.0,4.0)')) {
-        version { strictly '[3.42.0.0,4.0)'; prefer '3.42.0.0' }
-    }
+    // MixinExtras (bundled with Forge at runtime, needed at compile time)
+    compileOnly(annotationProcessor("io.github.llamalad7:mixinextras-common:0.3.5"))
 
-    // Mixin annotation processor,用于生成 refmap (Forge 1.20.1 运行期 SRG 映射需要)
-    compileOnly 'org.spongepowered:mixin:0.8.5'
-    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
-    testImplementation platform('org.junit:junit-bom:5.10.3')
-    testImplementation 'org.junit.jupiter:junit-jupiter'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // Embeddium (Sodium for Forge)
+    modImplementation "maven.modrinth:sk9rgfiA:AYqEbec0"
+
+    // Oculus (Iris for Forge)
+    modCompileOnly "maven.modrinth:GchcoXML:Mw8aFpWF"
+
+    // Chunky
+    modCompileOnly "curse.maven:chunky-pregenerator-forge-485681:3970964"
+
+    // Dynamic Trees (Au Naturel fork). Compile-only — the compat code in
+    // me.cortex.voxy.compat.dynamictrees references BranchBlock and Family
+    // for the state-proxy resolver. Runtime gated on
+    // ModList.isLoaded("dynamictrees"), so no hard dep at install time.
+    // Deployed jars in newtest/aunaturel are byte-identical to this build
+    // output (md5 4c7215dd...) so the compile target matches the runtime.
+    modCompileOnly "maven.modrinth:vdjF5PL5:byXgtF59"
 }
 
-// 配置 JarJar 内嵌依赖的版本范围
-configurations.configureEach {
-    resolutionStrategy.eachDependency { details ->
-        if (details.requested.group == 'org.lwjgl') {
-            details.useVersion '3.3.1'
-        }
-    }
-}
 
-tasks.named('processResources', ProcessResources).configure {
-    var replaceProperties = [
-            minecraft_version   : minecraft_version,
-            minecraft_version_range: '[1.19.2,1.20)',
-            forge_version       : forge_version,
-            forge_version_range : '[43,)',
-            loader_version_range: '[43,)',
-            mod_version         : mod_version,
-    ]
-    inputs.properties replaceProperties
-
-    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
-        expand replaceProperties + [project: project]
-    }
-
-    // MixinGradle 会自动把 refmap 打包进 jar。
-    duplicatesStrategy = DuplicatesStrategy.INCLUDE
-}
-
+// Bumped from 17 to 21 to unlock Integer.compress/expand intrinsics
+// (BMI2 PEXT/PDEP on x86) used in the per-voxel hot path. Runtime target
+// is Java 26 (Forge 47.4.20 on Java 26); Java 21 is the minimum that
+// surfaces the intrinsics while preserving compatibility with any JRE >= 21.
+// Compile JDK is pinned to /home/acow/jdk-21.0.9 via gradle.properties
+// (org.gradle.java.home) — see also gradle.properties for that pin.
+def targetJavaVersion = 17
 tasks.withType(JavaCompile).configureEach {
-    it.options.encoding = 'UTF-8'
-    it.options.release = Integer.parseInt(project.java_version)
+    it.options.encoding = "UTF-8"
+    it.options.release = targetJavaVersion
     it.options.deprecation = true
-}
-
-// ForgeGradle 6 默认禁用 jarJar 任务,需要显式启用以打包内嵌依赖
-tasks.named('jarJar').configure {
-    enabled = true
-    // MixinGradle 默认只把 refmap 添加到 jar 任务,jarJar 任务需要手动包含,
-    // 否则 -all.jar 里没有 refmap,运行时 mixin 注入点找不到 SRG 方法名。
-    from("${buildDir}/tmp/compileJava/compileJava-refmap.json") {
-        rename { 'client.voxy.refmap.json' }
-    }
-    dependsOn(tasks.compileJava)
-}
-
-// Mixin Gradle 插件: 为 Forge 1.20.1 运行时 SRG 映射生成 refmap,
-// 否则 mixin 注入点使用开发期 official 映射名,运行时找不到目标方法。
-mixin {
-    add sourceSets.main, 'client.voxy.refmap.json'
-    config 'client.voxy.mixins.json'
 }
 
 tasks.withType(Test).configureEach {
     useJUnitPlatform()
-    maxHeapSize = '2G'
+    maxHeapSize = "2G"
 }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(project.java_version)
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 
-jar {
-    from('LICENSE') {
+// A private configuration that pulls the platform-specific native .so/.dll
+// payloads out of the LWJGL native-classifier jars. Kept separate from the
+// JIJ-bound `include(...)` configuration because Forge's JIJ resolver dedupes
+// by group:artifact:version — native-linux and native-windows share those
+// with the base jar and would clobber it. Instead we unzip these into the
+// voxy jar at the paths LWJGL's Library.loadSystem searches
+// (linux/x64/*, windows/x64/*), so LWJGL finds them on the classpath at
+// runtime without going through jarjar.
+configurations {
+    lwjglNativesIntoJar
+
+    // Deps that are RELOCATED into the voxy jar at a voxy-private package
+    // path (via shadowJar.relocate below) rather than JIJ'd as a sibling jar.
+    // For libraries whose package names commonly conflict across mods (LZ4),
+    // this avoids JPMS package-overlap LayerInstantiationExceptions.
+    shadowMe {
+        // Don't drag transitive deps into the shaded payload — we shade only
+        // what we name explicitly.
+        transitive = false
+    }
+    implementation.extendsFrom(shadowMe)
+}
+
+// Shared customizations applied to both `jar` (dev / unmapped output) and
+// `shadowJar` (what `remapJar` actually consumes for the published artifact).
+// Use project.configurations explicitly — shadowJar overrides `configurations`
+// on the task itself (it's the list of deps to shade), which would shadow
+// project.configurations during property resolution.
+def commonJarCustomizations = {
+    from("LICENSE.md") {
         rename { "${it}_${project.archives_base_name}" }
     }
-    manifest {
-        attributes([
-                'Specification-Title'     : project.archives_base_name,
-                'Specification-Vendor'    : 'Cortex',
-                'Specification-Version'   : project.mod_version,
-                'Implementation-Title'    : project.archives_base_name,
-                'Implementation-Version'  : project.mod_version,
-                'Implementation-Vendor'   : 'Cortex'
-        ])
+    exclude "fabric.mod.json"
+
+    into('') {
+        from({ project.configurations.lwjglNativesIntoJar.collect { zipTree(it) } })
+        include 'linux/**'
+        include 'windows/**'
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
+}
+
+jar commonJarCustomizations
+
+shadowJar {
+    // Only bundle what we explicitly named as shadowMe. Everything else
+    // (voxy's own classes, the other JIJ deps, LWJGL natives) is handled
+    // separately — JIJ via include(...) for the deps that don't collide,
+    // and the commonJarCustomizations block for LWJGL natives + LICENSE.
+    configurations = [project.configurations.shadowMe]
+
+    // Relocate net.jpountz.* (lz4-java's package) into a voxy-private path.
+    // Shadow rewrites class names, references in bytecode, AND resource
+    // paths matching the prefix — including the bundled native libraries
+    // at net/jpountz/util/<os>/<arch>/lib*. At runtime lz4-java's Native
+    // class derives its resource path from its own package name (via
+    // Class.getResource), so the relocated natives are found at the
+    // relocated path. No source-code changes required.
+    relocate 'net.jpountz', 'me.cortex.voxy.shaded.lz4'
+
+    // Apply the same customizations as the regular jar task so the output
+    // remapJar consumes is a strict superset of what `jar` produces.
+    // Inlined (rather than `with commonJarCustomizations`) because `with`
+    // is a CopySpec-merge method, not a "call closure with delegate" — and
+    // shadowJar shadows `configurations` anyway, see above.
+    from("LICENSE.md") {
+        rename { "${it}_${project.archives_base_name}" }
+    }
+    exclude "fabric.mod.json"
+
+    into('') {
+        from({ project.configurations.lwjglNativesIntoJar.collect { zipTree(it) } })
+        include 'linux/**'
+        include 'windows/**'
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+
+    // Declare the same MixinConfigs manifest attribute that loom's
+    // forge { mixinConfigs } block injects on the regular jar. remapJar
+    // reads this from the jar it's processing to discover which mixin
+    // configs need refmap remapping. `manifest.from(jar.manifest)` doesn't
+    // work here — loom populates jar.manifest in an afterEvaluate hook that
+    // fires after this configuration closure, so the copy captures an empty
+    // manifest. Setting the attribute directly is unambiguous.
+    manifest {
+        attributes 'MixinConfigs': 'client.voxy.mixins.json,common.voxy.mixins.json'
+    }
+
+    // dev/unmapped classifier; final published name is set on remapJar.
+    archiveClassifier.set('shadow')
+
+    // Park the shadow output in a separate directory so remapJar's `doFirst
+    // { delete fileTree(build/libs) }` (kept for dev classifier hygiene)
+    // doesn't nuke our just-built shadow jar before remap reads it.
+    destinationDirectory.set(layout.buildDirectory.dir('shadowlibs'))
+}
+
+remapJar {
+    // Route loom's remap step through the shaded jar. The plain `jar` task
+    // still runs (loom uses it for source-jar generation and dev-runtime
+    // assembly) but isn't the upstream of the published artifact.
+    dependsOn(shadowJar)
+    inputFile.set(shadowJar.archiveFile)
+
+    doFirst {
+        delete fileTree(getDestinationDirectory().get())
+    }
+
+    if (!isInGHA) {
+        def hash = gitCommitHash();
+        if (!hash.equals("<UnknownCommit>")) {
+            archiveClassifier.set(hash);
+        }
+    }
+}
+
+project.ext.lwjglVersion = "3.3.1"
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation platform("org.lwjgl:lwjgl-bom:$lwjglVersion")
+
+    implementation "org.lwjgl:lwjgl"
+    include(implementation "org.lwjgl:lwjgl-zstd:$lwjglVersion")
+    runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl:$lwjglVersion:natives-linux"
+    // Native classifier jars share the same Forge JIJ identifier (group:artifact:version)
+    // as the base jar; JIJ dedup keeps only one, breaking JPMS module resolution.
+    // Kept on gradle runtime classpath for local tests; do NOT include() in the jar.
+    runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-windows"
+    runtimeOnly "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-linux"
+
+    // And additionally: unzip these into the voxy jar root so LWJGL's
+    // Library.loadSystem classpath lookup finds liblwjgl_zstd.so /
+    // lwjgl_zstd.dll at runtime. The jar task above references this
+    // configuration to do the actual extraction.
+    lwjglNativesIntoJar "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-windows"
+    lwjglNativesIntoJar "org.lwjgl:lwjgl-zstd:$lwjglVersion:natives-linux"
+
+    include(implementation 'redis.clients:jedis:5.1.0')
+    include(implementation('org.rocksdb:rocksdbjni:10.2.1'))
+    include(implementation 'org.apache.commons:commons-pool2:2.12.0')
+    // lz4-java is SHADED into the voxy jar (relocated to me.cortex.voxy.shaded.lz4.*)
+    // instead of JIJ'd, to avoid JPMS package-overlap with other Forge mods
+    // that bundle their own lz4 (e.g. chisels-and-bits → scena → lz4-pure-java).
+    // See shadowJar block above and project_aunaturel_silent_failure.md.
+    shadowMe 'org.lz4:lz4-java:1.8.0'
+    include(implementation('org.tukaani:xz:1.10'))
 }

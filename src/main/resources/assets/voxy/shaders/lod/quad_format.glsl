@@ -1,4 +1,4 @@
-#ifdef QUAD_DATA_USE_64_BIT
+#ifdef GL_ARB_gpu_shader_int64
 #define Quad uint64_t
 
 #define Eu32(data, amountBits, shift) (uint((data)>>(shift))&((1u<<(amountBits))-1))
@@ -9,7 +9,13 @@ vec3 extractPos(uint64_t quad) {
 }
 
 ivec2 extractSize(uint64_t quad) {
-    return ivec2(Eu32(quad, 4, 3), Eu32(quad, 4, 7)) + ivec2(1);//the + 1 is cause you cant actually have a 0 size quad
+    //5-bit sizes (1..32): low 4 bits at the historic positions, 5th bit in
+    //the spare bits 42 (x) / 43 (y). The + 1 is cause you cant actually have
+    //a 0 size quad
+    return ivec2(
+        Eu32(quad, 4, 3) | (Eu32(quad, 1, 42)<<4),
+        Eu32(quad, 4, 7) | (Eu32(quad, 1, 43)<<4)
+    ) + ivec2(1);
 }
 
 uint extractFace(uint64_t quad) {
@@ -53,7 +59,11 @@ vec3 extractPos(ivec2 quad) {
 }
 
 ivec2 extractSize(ivec2 quad) {
-    return ivec2(Eu32v(quad, 4, 3), Eu32v(quad, 4, 7)) + ivec2(1);//the + 1 is cause you cant actually have a 0 size quad
+    //5-bit sizes, see the int64 variant above
+    return ivec2(
+        Eu32v(quad, 4, 3) | (Eu32v(quad, 1, 42)<<4),
+        Eu32v(quad, 4, 7) | (Eu32v(quad, 1, 43)<<4)
+    ) + ivec2(1);
 }
 
 uint extractFace(ivec2 quad) {

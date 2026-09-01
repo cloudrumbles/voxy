@@ -1,35 +1,50 @@
 package me.cortex.voxy.client;
 
-import me.cortex.voxy.client.core.util.GPUTiming;
+import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+import me.cortex.voxy.client.core.VoxyRenderSystem;
+import me.cortex.voxy.commonImpl.VoxyCommon;
+import net.minecraft.ChatFormatting;
+import net.minecraft.client.Minecraft;
 
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
- * 1.20.1 适配:1.21+ 的 DebugScreenEntries/DebugScreenEntry/DebugScreenDisplayer/
- * DebugScreenEntryStatus/Identifier.fromNamespaceAndPath 在 1.20.1 中均不存在。
- * 1.20.1 的调试屏幕通过 DebugScreenOverlay + RenderGuiOverlayEvent/ClientForgeEvents
- * 实现,API 完全不同。
- *
- * 本移植将 init() 与 onRebuild() 桩化为 no-op,以保留 VoxyClient.onInitializeClient()
- * 调用链不断。若要在 1.20.1 上恢复调试信息显示,需基于 DebugScreenOverlay 重新实现。
+ * Provides debug overlay lines for the F3 screen.
+ * On 1.20.1, these are injected via mixin into the debug overlay rather than
+ * through the DebugScreenEntries API (which doesn't exist in this version).
  */
 public class DebugEntries {
     public static void init() {
-        // no-op: 1.21+ DebugScreenEntries API 不可用
+        // No-op on Forge 1.20.1; debug lines are added via MixinDebugOverlay
     }
 
-    private static boolean previousGpuDebugEnabled = false;
+    public static List<String> getDebugLines() {
+        List<String> lines = new ArrayList<>();
 
-    @SuppressWarnings({"rawtypes", "unchecked"})
-    public static void onRebuild(Map allStatuses, List enabled) {
-        // no-op: 1.21+ DebugScreenEntryStatus API 不可用,仅保留签名以便其他位置调用不报错
-        boolean nowEnabled = !enabled.isEmpty();
-        if (nowEnabled != previousGpuDebugEnabled) {
-            previousGpuDebugEnabled ^= true;
-            GPUTiming.INSTANCE.setEnabled(previousGpuDebugEnabled);
-            RenderStatistics.enabled = previousGpuDebugEnabled;
-            // 1.20.1 中 Minecraft 没有 levelExtractor,跳过 allChanged() 调用
+        if (!VoxyCommon.isAvailable()) {
+            lines.add(ChatFormatting.RED + "voxy-" + VoxyCommon.MOD_VERSION);
+            return lines;
         }
+
+        var instance = VoxyCommon.getInstance();
+        if (instance == null) {
+            lines.add(ChatFormatting.YELLOW + "voxy-" + VoxyCommon.MOD_VERSION);
+            return lines;
+        }
+
+        VoxyRenderSystem vrs = null;
+        var wr = Minecraft.getInstance().levelRenderer;
+        if (wr != null) vrs = ((IGetVoxyRenderSystem) wr).getVoxyRenderSystem();
+
+        lines.add((vrs == null ? ChatFormatting.DARK_GREEN : ChatFormatting.GREEN) + "voxy-" + VoxyCommon.MOD_VERSION);
+
+        instance.addDebug(lines);
+
+        if (vrs != null) {
+            vrs.addDebugInfo(lines);
+        }
+
+        return lines;
     }
 }

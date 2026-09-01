@@ -1,9 +1,9 @@
 package me.cortex.voxy.common.config.compressors;
 
 import me.cortex.voxy.common.config.ConfigBuildCtx;
-import me.cortex.voxy.common.config.section.SectionSerializationStorage;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.util.ResizingThreadLocalMemoryBuffer;
+import me.cortex.voxy.common.world.SaveLoadSystem3;
 
 import static me.cortex.voxy.common.util.GlobalCleaner.CLEANER;
 import static org.lwjgl.util.zstd.Zstd.*;
@@ -29,7 +29,7 @@ public class ZSTDCompressor implements StorageCompressor {
     private static final ThreadLocal<Ref> COMPRESSION_CTX = ThreadLocal.withInitial(ZSTDCompressor::createCleanableCompressionContext);
     private static final ThreadLocal<Ref> DECOMPRESSION_CTX = ThreadLocal.withInitial(ZSTDCompressor::createCleanableDecompressionContext);
 
-    private static final ResizingThreadLocalMemoryBuffer SCRATCH = new ResizingThreadLocalMemoryBuffer(SectionSerializationStorage.BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
+    private static final ResizingThreadLocalMemoryBuffer SCRATCH = new ResizingThreadLocalMemoryBuffer(SaveLoadSystem3.BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
 
     private final int level;
 
@@ -41,6 +41,9 @@ public class ZSTDCompressor implements StorageCompressor {
     public MemoryBuffer compress(MemoryBuffer saveData) {
         var compressedData = SCRATCH.get(ZSTD_COMPRESSBOUND(saveData.size)).createUntrackedUnfreeableReference();
         long compressedSize = nZSTD_compressCCtx(COMPRESSION_CTX.get().ptr, compressedData.address, compressedData.size, saveData.address, saveData.size, this.level);
+        if (ZSTD_isError(compressedSize)) {
+            throw new IllegalStateException("ZSTD compression failed: " + ZSTD_getErrorName(compressedSize));
+        }
         return compressedData.subSize(compressedSize);
     }
 
@@ -48,7 +51,9 @@ public class ZSTDCompressor implements StorageCompressor {
     public MemoryBuffer decompress(MemoryBuffer saveData) {
         var decompressed = SCRATCH.get().createUntrackedUnfreeableReference();
         long size = nZSTD_decompressDCtx(DECOMPRESSION_CTX.get().ptr, decompressed.address, decompressed.size, saveData.address, saveData.size);
-        //TODO:FIXME: DONT ASSUME IT DOESNT FAIL
+        if (ZSTD_isError(size)) {
+            throw new IllegalStateException("ZSTD decompression failed: " + ZSTD_getErrorName(size));
+        }
         return decompressed.subSize(size);
     }
 

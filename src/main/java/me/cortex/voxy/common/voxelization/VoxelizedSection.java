@@ -49,6 +49,21 @@ public class VoxelizedSection {
         return new VoxelizedSection(new long[16*16*16 + 8*8*8 + 4*4*4 + 2*2*2 + 1]);
     }
 
+    // Clears the ENTIRE mip pyramid (LOD0 + LOD1..4). Only called from the
+    // all-air shortcut paths in VoxelIngestService and VoxyDistantGenSaveService,
+    // where the zeroed section is shipped directly to WorldUpdater.insertUpdate
+    // without convert/mipSection running. Higher levels MUST be zero in that
+    // path — nothing else writes them.
+    //
+    // The path with actual data (WorldConversionFactory.convert +
+    // mipSection) does NOT call zero(): convert overwrites LOD0, then
+    // mipSection rewrites LOD1..4 from new LOD0. Skipping zero() there is
+    // intentional and safe.
+    //
+    // A previous audit suggested zeroing only LOD0 here for ~5 KiB of saved
+    // work per ingest; that would silently leak stale LOD1..4 from the
+    // thread-local cache's previous use into the all-air consumer's view.
+    // Don't change this without rewriting the consumer paths too.
     public VoxelizedSection zero() {
         this.lvl0NonAirCount = 0;
         Arrays.fill(this.section, 0);

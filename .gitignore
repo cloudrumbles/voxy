@@ -5,3 +5,16 @@
 /run/
 /out/
 /logs/
+/bin/
+# Local diagnostic helper with hardcoded paths
+/run-captured.sh
+# Local reference copy of upstream voxy source for diff comparison
+/.upstream-ref/
+# Stray local artifacts (decompiled refs, captures, audit dumps, packaged jars/zips)
+/net/
+/photon-optimised/
+/renderdoccaptures/
+/*.jar
+/*.zip
+/sss-audit-*.csv
+/sss-audit-*.tsv

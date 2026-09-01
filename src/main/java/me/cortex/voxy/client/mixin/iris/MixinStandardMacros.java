@@ -1,0 +1,38 @@
+package me.cortex.voxy.client.mixin.iris;
+
+import com.google.common.collect.ImmutableList;
+import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
+import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import me.cortex.voxy.client.config.VoxyConfig;
+import me.cortex.voxy.client.iris.IrisShaderPatch;
+import net.irisshaders.iris.gl.shader.StandardMacros;
+import net.irisshaders.iris.helpers.StringPair;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+
+import java.util.Collection;
+import java.util.List;
+
+@Mixin(value = StandardMacros.class, remap = false)
+public abstract class MixinStandardMacros {
+
+    @Shadow
+    private static void define(List<StringPair> defines, String key){}
+
+    @Shadow
+    private static  void define(List<StringPair> defines, String key, String value){}
+
+    @WrapOperation(method = "createStandardEnvironmentDefines", at = @At(value = "INVOKE", target = "Lcom/google/common/collect/ImmutableList;copyOf(Ljava/util/Collection;)Lcom/google/common/collect/ImmutableList;"))
+    private static ImmutableList<StringPair> voxy$injectVoxyDefine(Collection<StringPair> list, Operation<ImmutableList<StringPair>> original) {
+        // See MixinProgramSet for why this is isRenderingConfigured (config
+        // intent) rather than isRenderingEnabled (runtime availability): the
+        // VOXY shader macro must be defined consistently with whether the
+        // patch was built, otherwise iris shaders compile voxy code paths
+        // against missing uniform/sampler bindings.
+        if (VoxyConfig.CONFIG.isRenderingConfigured()) {
+            define((List<StringPair>) list, "VOXY", Integer.toString(IrisShaderPatch.SHADER_DEFINE_VERSION));
+        }
+        return ImmutableList.copyOf(list);
+    }
+}

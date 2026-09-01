@@ -1,5 +1,4 @@
 #import <voxy:lod/pos_util.glsl>
-#import <voxy:lod/lighting.glsl>
 //Common utility functions for decoding and operating on quads
 
 vec3 swizzelDataAxis(uint axis, vec3 data) {
@@ -35,11 +34,16 @@ struct QuadData {
 };
 
 uint makeQuadFlags(uint faceData, uint modelId, ivec2 quadSize, const in BlockModel model, uint face) {
-    //bit: 0-use cuttout, 1-dont use mipmaps, 2|3-tint state, 4|6-face, 8|11-width, 12|15-height, 16|31-model id
+    //bit: 0-use cuttout, 1-height bit4, 2|3-tint state, 4|6-face, 7-width bit4,
+    //     8|11-width low bits, 12|15-height low bits, 16|31-model id
+    //(sizes are 5-bit, 1..32 stored as size-1; bit 1 was the dead
+    // "dont use mipmaps" flag, bit 7 was unused)
     uint flags = 0;
 
     flags |= modelId<<16;//Model id
-    flags |= (uint(quadSize.x-1)<<8)|(uint(quadSize.y-1)<<12);//quad size
+    flags |= ((uint(quadSize.x-1)&0xFu)<<8)|((uint(quadSize.y-1)&0xFu)<<12);//quad size low bits
+    flags |= (uint(quadSize.x-1)&0x10u)<<3;//width bit4 -> bit 7
+    flags |= (uint(quadSize.y-1)&0x10u)>>3;//height bit4 -> bit 1
 
     {//Cuttout
         flags |= faceHasAlphaCuttout(faceData);
@@ -142,6 +146,47 @@ void setupQuad(out QuadData quad, const in Quad rawQuad, uvec2 sPos, bool genera
     quad.lodScale = lodScale;
     quad.axis = face>>1;
     quad.basePoint = (quadStart*lodScale)+vec3(baseSection<<5);
+
+    // LoD water-seam compensation - prototype, NOT the principled fix.
+    //
+    // Cause: the mipper (common.world.other.Mipper.mip) picks the
+    // most-opaque non-air sub-voxel of each 2x2x2 group as the LoD-(N+1)
+    // voxel and discards its sub-cell position. The renderer then draws
+    // that voxel filling the entire mip cell, so a fluid surface whose
+    // source LoD-0 voxel sat at the bottom half of the cell renders its
+    // +Y face up to (lodScale-1) world blocks above the real surface.
+    // At vanilla sea level (topmost water voxel at internal-y=62, even
+    // parity) the LoD-1 cell covering [62,64] straddles water and air,
+    // the mip picks water, and the LoD-1 surface appears at world Y=64
+    // vs the LoD-0 surface at world Y=63 - a 1-block step, visible at
+    // grazing angle as a thin translucent ring on water at every LoD
+    // transition radius. Most apparent on water because the surface is
+    // wide, flat, translucent, and reflection-sensitive.
+    //
+    // What this does: pull every LoD>0 fluid voxel down 1 world block.
+    // Eliminates the seam when the topmost water voxel has even
+    // internal-y (vanilla sea level and most natural lakes). The bottom
+    // face shifts too but is culled against the voxel below.
+    //
+    // Known limitation: opposite-parity case (topmost water voxel at
+    // odd internal-y, e.g. a custom lake at world Y=64) - the LoD-1
+    // cell is already fully water and matches LoD-0 with no shift; this
+    // line then INTRODUCES a 1-block downward seam of equal magnitude.
+    // Vanilla worlds rarely hit it; terrain mods can.
+    //
+    // Real fix: stop discarding the sub-cell offset. Add a per-voxel
+    // field in the mip pyramid (1 bit per fluid voxel is enough for
+    // half-cell resolution; more bits buy finer alignment at LoD>=2)
+    // recording where inside the cell the source surface sat. Mipper
+    // computes it from the topmost non-air child; mesher (or this
+    // shader) emits the +Y face at cell_bottom + offset instead of
+    // cell_top. Same approach extends to opaque surfaces if their LoD
+    // steps ever become objectionable. Until then, the constant -1
+    // below is the cheapest approximation that kills the dominant
+    // visible artefact.
+    if (lodScale > 1.0 && modelIsFluid(model)) {
+        quad.basePoint.y -= 1.0;
+    }
     #ifdef USE_SINGLE_TRI
     quad.quadSizeAddin = (faceSize.yw + (quadSize - 1)*2);
     #else

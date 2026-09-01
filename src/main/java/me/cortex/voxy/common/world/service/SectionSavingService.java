@@ -28,11 +28,9 @@ public class SectionSavingService {
         section.assertNotFree();
         try {
             //Unmark it dirty here (if it wasnt or w/e) so that it doesnt pointlessly resave (in theory this should be safe to do)
+            section.setNotDirty();
             if (section.exchangeIsInSaveQueue(false)) {
-                section.setNotDirty();//do after the atomic exchange
                 task.engine.storage.saveSection(section);
-            } else {
-                section.setNotDirty();
             }
         } catch (Exception e) {
             Logger.error("Voxy saver had an exception while executing please check logs and report error", e);
@@ -49,12 +47,11 @@ public class SectionSavingService {
         }
     }*/
 
-    public boolean enqueueSave(WorldEngine in, WorldSection section, boolean nonBlocking, boolean sectionAlreadyAcquired) {
+    public void enqueueSave(WorldEngine in, WorldSection section, boolean nonBlocking) {
         //If its not enqueued for saving then enqueue it
         if (section.exchangeIsInSaveQueue(true)) {
-            if (!sectionAlreadyAcquired) {
-                section.acquire(); //Acquire the section for use
-            }
+            //Acquire the section for use
+            section.acquire();
 
             //Hard limit the save count to prevent OOM
             if ((!nonBlocking) && this.getTaskCount() > SOFT_MAX_QUEUE_SIZE) {
@@ -77,20 +74,47 @@ public class SectionSavingService {
 
             this.saveQueue.add(new SaveEntry(in, section));
             this.service.execute();
-            return true;
         }
-        return false;
     }
 
     public void shutdown() {
-        if (this.service.numJobs() != 0) {
-            Logger.error("Voxy section saving still in progress, estimated " + this.service.numJobs() + " sections remaining.");
-            this.service.blockTillEmpty();
+        // Give worker threads a brief window to drain in parallel (fast if
+        // the shared thread pool is still alive), then stop the service and
+        // finish whatever's left synchronously on the caller. Both steps
+        // are time-bounded so a huge queue or a stuck worker can't hang the
+        // game; dropped sections will be re-ingested next session.
+        long parallelDeadline = System.currentTimeMillis() + 2000L;
+        while (this.service.isLive() && this.service.numJobs() > 0 && System.currentTimeMillis() < parallelDeadline) {
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
+
+        int pending = Math.max(this.service.numJobs(), this.saveQueue.size());
         this.service.shutdown();
-        //Manually save any remaining entries
-        while (!this.saveQueue.isEmpty()) {
-            this.processJob();
+        if (pending > 0) {
+            Logger.info("Flushing up to " + pending + " pending section saves synchronously on shutdown.");
+        }
+
+        long syncDeadline = System.currentTimeMillis() + 5000L;
+        int drained = 0;
+        while (!this.saveQueue.isEmpty() && System.currentTimeMillis() < syncDeadline) {
+            try {
+                this.processJob();
+                drained++;
+                if ((drained & 63) == 0) {
+                    Logger.info("Synchronous save drain progress: " + drained + " done, " + this.saveQueue.size() + " remaining");
+                }
+            } catch (Exception e) {
+                Logger.error("Error in synchronous save drain", e);
+            }
+        }
+        if (!this.saveQueue.isEmpty()) {
+            Logger.error("Save queue did not drain within the shutdown budget; dropping " + this.saveQueue.size() + " remaining sections (can be re-ingested next session).");
+            this.saveQueue.clear();
         }
     }
 

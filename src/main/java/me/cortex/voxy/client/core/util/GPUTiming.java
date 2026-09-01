@@ -22,7 +22,7 @@ public class GPUTiming {
     private float[] timings = new float[0];
     private String[] lables = new String[0];
 
-    private boolean enabled = false;
+    private boolean enabled = true;
 
     public void marker() {
         this.marker(null);
@@ -168,40 +168,4 @@ public class GPUTiming {
             }
         }
     }
-    /*
-    private static final class GlTimestampQuerySet extends TrackedObject {
-        private final int query = glGenQueries();
-        public final GlBuffer store;
-        public final int[] metadata;
-        public int index;
-        public GlTimestampQuerySet(int maxCount) {
-            this.store = new GlBuffer(maxCount*8L);
-            this.metadata = new int[maxCount];
-        }
-
-        public void capture(int metadata) {
-            if (this.index>this.metadata.length) {
-                throw new IllegalStateException();
-            }
-            int slot = this.index++;
-            this.metadata[slot] = metadata;
-            glQueryCounter(this.query, GL_TIMESTAMP);//This should be gpu side, so should be fast
-            glFinish();
-            glGetQueryBufferObjectui64v(this.query, this.store.id, GL_QUERY_RESULT_NO_WAIT, slot*8L);
-            glMemoryBarrier(-1);
-        }
-
-        public void download(TimingDataConsumer consumer) {
-            var meta = Arrays.copyOf(this.metadata, this.index);
-            this.index = 0;
-            //DownloadStream.INSTANCE.download(this.store, buffer->consumer.accept(meta, buffer));
-        }
-
-        @Override
-        public void free() {
-            super.free0();
-            glDeleteQueries(this.query);
-            this.store.free();
-        }
-    }*/
 }

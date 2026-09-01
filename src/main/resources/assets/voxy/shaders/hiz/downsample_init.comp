@@ -1,0 +1,30 @@
+#version 460 core
+
+// HiZ pyramid level 0: downsample the (possibly non-pow2) source depth
+// buffer into the pow2 pyramid base. Replicates hiz/blit.fsh exactly so the
+// compute-built pyramid is value-equivalent to the fragment-built one:
+// textureGather of the source around the texel centre, max-reduced, with the
+// any-sky patch (a footprint containing a far-plane sample reduces to the
+// far plane, so geometry edges against sky never occlude).
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(binding = 0) uniform sampler2D srcDepth;
+layout(binding = 1, r32f) uniform restrict writeonly image2D dstMip0;
+
+layout(location = 0) uniform ivec2 dstSize;
+
+float reduce(vec4 depths) {
+    bvec4 cv = lessThanEqual(vec4(0.999999999f), depths);
+    if (any(cv)) {
+        depths = mix(vec4(0.0f), depths, cv);
+    }
+    return max(max(depths.x, depths.y), max(depths.z, depths.w));
+}
+
+void main() {
+    ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(pos, dstSize))) return;
+    vec2 uv = (vec2(pos) + 0.5f) / vec2(dstSize);
+    imageStore(dstMip0, pos, vec4(reduce(textureGather(srcDepth, uv, 0))));
+}

@@ -1,47 +1,36 @@
 package me.cortex.voxy.common.util;
 
-import me.cortex.voxy.common.Logger;
 import org.lwjgl.system.*;
+import org.lwjgl.system.windows.WindowsLibrary;
 
 //Platform specific code to assist in thread utilities
-//NOTE: Forge 1.20.1 用的 LWJGL 3.3.1 中没有 org.lwjgl.system.windows.Kernel32 类 (3.3.2+ 才引入),
-//因此本类直接用 SharedLibrary + JNI 调用 Kernel32 函数,等价行为。
 public class ThreadUtils {
     public static final int WIN32_THREAD_PRIORITY_TIME_CRITICAL = 15;
     public static final int WIN32_THREAD_PRIORITY_LOWEST = -2;
     public static final int WIN32_THREAD_MODE_BACKGROUND_BEGIN = 0x00010000;
     public static final int WIN32_THREAD_MODE_BACKGROUND_END = 0x00020000;
     public static final boolean isWindows = Platform.get() == Platform.WINDOWS;
-    public static final boolean isLinux = Platform.get() == Platform.LINUX;
-    // Win32 GetCurrentThread() 总是返回 pseudo handle -1L (代表当前线程)
-    private static final long CURRENT_THREAD_PSEUDO_HANDLE = -1L;
+    private static final SharedLibrary kernel32Lib;
+    private static final long GetCurrentThread;
     private static final long SetThreadPriority;
     private static final long SetThreadSelectedCpuSetMasks;
     private static final long schedSetaffinity;
     static {
         if (isWindows) {
-            SharedLibrary lib = null;
-            try {
-                lib = APIUtil.apiCreateLibrary("kernel32");
-            } catch (Throwable t) {
-                Logger.error("Failed to load kernel32", t);
-            }
-            SetThreadPriority = lib != null ? lib.getFunctionAddress("SetThreadPriority") : 0L;
-            SetThreadSelectedCpuSetMasks = lib != null ? lib.getFunctionAddress("SetThreadSelectedCpuSetMasks") : 0L;
+            kernel32Lib = new WindowsLibrary("kernel32");
+            GetCurrentThread = kernel32Lib.getFunctionAddress("GetCurrentThread");
+            SetThreadPriority = kernel32Lib.getFunctionAddress("SetThreadPriority");
+            SetThreadSelectedCpuSetMasks = kernel32Lib.getFunctionAddress("SetThreadSelectedCpuSetMasks");
         } else {
+            kernel32Lib = null;
+            GetCurrentThread = 0;
             SetThreadPriority = 0;
             SetThreadSelectedCpuSetMasks = 0;
         }
 
         if (Platform.get() == Platform.LINUX) {
-            long fn = 0;
-            try {
-                var libc = APIUtil.apiCreateLibrary("libc.so.6");
-                fn = APIUtil.apiGetFunctionAddress(libc, "sched_setaffinity");
-            } catch (Exception e) {
-                Logger.error(e);
-            }
-            schedSetaffinity = fn;
+            var libc = APIUtil.apiCreateLibrary("libc.so.6");
+            schedSetaffinity = APIUtil.apiGetFunctionAddress(libc, "sched_setaffinity");
         } else {
             schedSetaffinity = 0;
         }
@@ -57,12 +46,9 @@ public class ThreadUtils {
         }
 
         if (masks == null) {
-            // LWJGL 3.3.1 没有 invokePPCI,用 invokePPI(long,long,short,long) 代替
-            int retVal = JNI.invokePPI(CURRENT_THREAD_PSEUDO_HANDLE, 0L, (short) 0, SetThreadSelectedCpuSetMasks);
+            int retVal = JNI.invokePPI(JNI.callP(GetCurrentThread), 0L, (short) 0, SetThreadSelectedCpuSetMasks);
             if (retVal == 0) {
-                // 1.20.1 移植:CPU 亲和性设置失败不应中断游戏启动(可能权限不足或函数不可用)
-                Logger.warn("SetThreadSelectedCpuSetMasks returned 0 (likely insufficient privilege), continuing without CPU set affinity");
-                return false;
+                throw new IllegalStateException();
             }
             return true;
         }
@@ -78,10 +64,9 @@ public class ThreadUtils {
                 MemoryUtil.memPutShort(ptr+i*16L+8L, groups[i]);
             }
 
-            int retVal = JNI.invokePPI(CURRENT_THREAD_PSEUDO_HANDLE, ptr, (short)masks.length, SetThreadSelectedCpuSetMasks);
+            int retVal = JNI.invokePPI(JNI.callP(GetCurrentThread), ptr, (short)masks.length, SetThreadSelectedCpuSetMasks);
             if (retVal == 0) {
-                Logger.warn("SetThreadSelectedCpuSetMasks returned 0 (likely insufficient privilege), continuing without CPU set affinity");
-                return false;
+                throw new IllegalStateException();
             }
             return true;
         }
@@ -91,10 +76,8 @@ public class ThreadUtils {
         if (SetThreadPriority == 0 || !isWindows) {
             return false;
         }
-        if (JNI.invokePI(CURRENT_THREAD_PSEUDO_HANDLE, priority, SetThreadPriority)==0) {
-            // 1.20.1 移植:线程优先级提升失败不应中断游戏启动(需要 SeIncreaseBasePriorityPrivilege)
-            Logger.warn("SetThreadPriority returned 0 for priority " + priority + " (likely insufficient privilege), continuing with default priority");
-            return false;
+        if (JNI.callPI(JNI.callP(GetCurrentThread), priority, SetThreadPriority)==0) {
+            throw new IllegalStateException("Operation failed");
         }
         return true;
     }
@@ -111,8 +94,7 @@ public class ThreadUtils {
 
             int retVal = JNI.invokePPI(0, (long)masks.length*8, ptr, schedSetaffinity);
             if (retVal != 0) {
-                Logger.warn("sched_setaffinity returned " + retVal + ", continuing without CPU affinity");
-                return false;
+                throw new IllegalStateException();
             }
             return true;
         }

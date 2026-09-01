@@ -81,7 +81,6 @@ void main() {
         positionBuffer[drawId] = extractRawPos(meta);
         uvec4 counts = meta.b;
 
-        //TODO implicit command merging
         uint msk = 0;
         msk |= uint(((counts.y      &0xFFFFu)!=0) && (relative.y>-1))<<0;
         msk |= uint((((counts.y>>16)&0xFFFFu)!=0) && (relative.y<1 ))<<1;
@@ -91,15 +90,6 @@ void main() {
         msk |= uint((((counts.w>>16)&0xFFFFu)!=0) && (relative.x<1 ))<<5;
 
         msk |= uint(((counts.x>>16)&0xFFFFu)!=0)<<6;
-
-
-        uint cmdCnt = bitCount(msk);
-        uint cmdPtr = atomicAdd(opaqueDrawCount, cmdCnt);
-
-        uint tCmdPtr = 0;
-        if (renderTemporally) {
-            tCmdPtr = atomicAdd(temporalOpaqueDrawCount, cmdCnt) + TEMPORAL_OFFSET;
-        }
 
         //TODO: make totalQuads also have temporal amount
         #ifdef HAS_STATISTICS
@@ -123,96 +113,83 @@ void main() {
         }
         ptr += count;
 
-        //Double sided quads
-        count = (counts.x>>16)&0xFFFFu;
-        if (count != 0) {
-            writeCmd(cmdPtr++, drawId, ptr, count);
-            if (renderTemporally) {
-                writeCmd(tCmdPtr++, drawId, ptr, count);
-            }
-            #ifdef HAS_STATISTICS
-            totalQuads += count;
-            #endif
-        }
-        ptr += count;
+        // Command merging. The opaque buckets (double-sided + 6 directional
+        // faces) are CONTIGUOUS in the geometry buffer in this order, so any
+        // run of consecutive rendered buckets is one contiguous quad range
+        // and can be drawn by a single command (the shared index buffer is a
+        // linear quad pattern; the draw shaders derive everything from
+        // gl_VertexID and gl_BaseInstance, neither of which is per-bucket).
+        // A run only breaks where a SKIPPED bucket has quads (a real gap in
+        // the range — back-face-eliminated buckets), or at the shared index
+        // buffer's capacity: one command can index at most 16380 quads
+        // (SharedIndexBuffer.generateQuadIndicesShort), a bound each single
+        // bucket already had to satisfy. Typical sections collapse from 5-7
+        // commands to 1-3.
+        const uint MAX_QUADS_PER_CMD = 16380u;
 
-        //Down
-        count = (counts.y)&0xFFFFu;
-        if (((msk&(1u<<0))!=0)) {
-            writeCmd(cmdPtr++, drawId, ptr, count);
-            if (renderTemporally) {
-                writeCmd(tCmdPtr++, drawId, ptr, count);
-            }
-            #ifdef HAS_STATISTICS
-            totalQuads += count;
-            #endif
-        }
-        ptr += count;
+        uint bucketCount[7] = uint[7](
+            (counts.x>>16)&0xFFFFu, // double-sided
+            (counts.y    )&0xFFFFu, // down
+            (counts.y>>16)&0xFFFFu, // up
+            (counts.z    )&0xFFFFu, // north
+            (counts.z>>16)&0xFFFFu, // south
+            (counts.w    )&0xFFFFu, // west
+            (counts.w>>16)&0xFFFFu  // east
+        );
+        // Render-eligibility per bucket, in memory order (eligible implies
+        // a non-zero count, see msk construction above).
+        bool bucketRendered[7] = bool[7](
+            (msk&(1u<<6))!=0,
+            (msk&(1u<<0))!=0,
+            (msk&(1u<<1))!=0,
+            (msk&(1u<<2))!=0,
+            (msk&(1u<<3))!=0,
+            (msk&(1u<<4))!=0,
+            (msk&(1u<<5))!=0
+        );
 
-        //Up
-        count = (counts.y>>16)&0xFFFFu;
-        if ((msk&(1u<<1))!=0) {
-            writeCmd(cmdPtr++, drawId, ptr, count);
-            if (renderTemporally) {
-                writeCmd(tCmdPtr++, drawId, ptr, count);
+        // Worst case 7 runs: every bucket rendered but split by the capacity
+        // flush. Explicitly zero-initialized: the merge loop always writes a
+        // run before reading it, but NVIDIA's compiler cannot prove that
+        // (warning C7050) and an unproven-initialization path is a
+        // driver-miscompilation hazard for the loop below.
+        uint runOffset[7] = uint[7](0u,0u,0u,0u,0u,0u,0u);
+        uint runCount[7] = uint[7](0u,0u,0u,0u,0u,0u,0u);
+        uint numRuns = 0;
+        bool inRun = false;
+        for (uint i = 0; i < 7; i++) {
+            uint c = bucketCount[i];
+            if (bucketRendered[i]) {
+                if (inRun && (runCount[numRuns-1] + c > MAX_QUADS_PER_CMD)) {
+                    inRun = false;
+                }
+                if (!inRun) {
+                    runOffset[numRuns] = ptr;
+                    runCount[numRuns] = 0;
+                    numRuns++;
+                    inRun = true;
+                }
+                runCount[numRuns-1] += c;
+                #ifdef HAS_STATISTICS
+                totalQuads += c;
+                #endif
+            } else if (c != 0) {
+                inRun = false; // skipped bucket with quads = gap in the range
             }
-            #ifdef HAS_STATISTICS
-            totalQuads += count;
-            #endif
+            ptr += c;
         }
-        ptr += count;
 
-        //North
-        count = (counts.z)&0xFFFFu;
-        if ((msk&(1u<<2))!=0) {
-            writeCmd(cmdPtr++, drawId, ptr, count);
-            if (renderTemporally) {
-                writeCmd(tCmdPtr++, drawId, ptr, count);
-            }
-            #ifdef HAS_STATISTICS
-            totalQuads += count;
-            #endif
+        uint cmdPtr = atomicAdd(opaqueDrawCount, numRuns);
+        uint tCmdPtr = 0;
+        if (renderTemporally) {
+            tCmdPtr = atomicAdd(temporalOpaqueDrawCount, numRuns) + TEMPORAL_OFFSET;
         }
-        ptr += count;
-
-        //South
-        count = (counts.z>>16)&0xFFFFu;
-        if ((msk&(1u<<3))!=0) {
-            writeCmd(cmdPtr++, drawId, ptr, count);
+        for (uint i = 0; i < numRuns; i++) {
+            writeCmd(cmdPtr++, drawId, runOffset[i], runCount[i]);
             if (renderTemporally) {
-                writeCmd(tCmdPtr++, drawId, ptr, count);
+                writeCmd(tCmdPtr++, drawId, runOffset[i], runCount[i]);
             }
-            #ifdef HAS_STATISTICS
-            totalQuads += count;
-            #endif
         }
-        ptr += count;
-
-        //West
-        count = (counts.w)&0xFFFFu;
-        if ((msk&(1u<<4))!=0) {
-            writeCmd(cmdPtr++, drawId, ptr, count);
-            if (renderTemporally) {
-                writeCmd(tCmdPtr++, drawId, ptr, count);
-            }
-            #ifdef HAS_STATISTICS
-            totalQuads += count;
-            #endif
-        }
-        ptr += count;
-
-        //East
-        count = (counts.w>>16)&0xFFFFu;
-        if ((msk&(1u<<5))!=0) {
-            writeCmd(cmdPtr++, drawId, ptr, count);
-            if (renderTemporally) {
-                writeCmd(tCmdPtr++, drawId, ptr, count);
-            }
-            #ifdef HAS_STATISTICS
-            totalQuads += count;
-            #endif
-        }
-        ptr += count;
 
         #ifdef HAS_STATISTICS
         atomicAdd(quadCounts[detail], totalQuads);
