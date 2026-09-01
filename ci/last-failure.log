@@ -1,6 +1,6 @@
 # Forge 1.19.2 CI failure
 
-commit: 5e06430e027e61208d85dfb8fce05884f321f50b
+commit: f00636c5050f10e1250be8ee487a8a8fdd429bb5
 
 To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.7/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
 Daemon will be stopped at the end of the build 
@@ -14,15 +14,15 @@ MixinGradle is skipping eclipse integration, extension not found
 > Task :createMcpToSrg
 
 > Task :compileJava
-[05:31:29] [main/INFO]: Writing debug log file accesstransform.log
-[05:31:29] [main/INFO]: Access Transformer processor running version 8.2.14
-[05:31:29] [main/INFO]: Command line arguments [--inJar, /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2/forge-1.19.2-43.5.2-injected.jar, --outJar, /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar, --logFile, accesstransform.log, --atFile, /home/runner/work/voxy/voxy/src/main/resources/META-INF/accesstransformer.cfg, --atFile, /home/runner/work/voxy/voxy/build/_atJar_4/parent_at.cfg]
-[05:31:29] [main/INFO]: Reading from /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2/forge-1.19.2-43.5.2-injected.jar
-[05:31:29] [main/INFO]: Writing to /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar
-[05:31:29] [main/INFO]: Transformer file /home/runner/work/voxy/voxy/src/main/resources/META-INF/accesstransformer.cfg
-[05:31:29] [main/INFO]: Transformer file /home/runner/work/voxy/voxy/build/_atJar_4/parent_at.cfg
-[05:31:29] [main/WARN]: Found existing output jar /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar, overwriting
-[05:31:32] [main/INFO]: JAR transformation complete /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar
+[05:33:12] [main/INFO]: Writing debug log file accesstransform.log
+[05:33:12] [main/INFO]: Access Transformer processor running version 8.2.14
+[05:33:12] [main/INFO]: Command line arguments [--inJar, /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2/forge-1.19.2-43.5.2-injected.jar, --outJar, /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar, --logFile, accesstransform.log, --atFile, /home/runner/work/voxy/voxy/src/main/resources/META-INF/accesstransformer.cfg, --atFile, /home/runner/work/voxy/voxy/build/_atJar_4/parent_at.cfg]
+[05:33:12] [main/INFO]: Reading from /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2/forge-1.19.2-43.5.2-injected.jar
+[05:33:12] [main/INFO]: Writing to /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar
+[05:33:12] [main/INFO]: Transformer file /home/runner/work/voxy/voxy/src/main/resources/META-INF/accesstransformer.cfg
+[05:33:12] [main/INFO]: Transformer file /home/runner/work/voxy/voxy/build/_atJar_4/parent_at.cfg
+[05:33:12] [main/WARN]: Found existing output jar /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar, overwriting
+[05:33:15] [main/INFO]: JAR transformation complete /home/runner/work/voxy/voxy/build/fg_cache/net/minecraftforge/forge/1.19.2-43.5.2_mapped_official_1.19.2/forge-1.19.2-43.5.2_mapped_official_1.19.2.jar
 Creating SRG -> MCP TSRG
 Note: SpongePowered MIXIN Annotation Processor Version=0.8.5 (MixinGradle Version=0.7.38)
 Note: Supported obfuscation types: ObfuscationServiceMCP supports [notch] ObfuscationServiceFG3 supports [searge]
@@ -469,7 +469,7 @@ Note: Writing searge composite mappings to /home/runner/work/voxy/voxy/build/tmp
 only showing the first 100 errors, of 402 total; use -Xmaxerrs if you would like to see more
 
 > Task :compileJava FAILED
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1788240667002.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1788240763804.json
 
 FAILURE: Build failed with an exception.
 
@@ -487,5 +487,5 @@ You can use '--warning-mode all' to show the individual deprecation warnings and
 
 For more on this, please refer to https://docs.gradle.org/8.7/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
 
-BUILD FAILED in 39s
+BUILD FAILED in 48s
 5 actionable tasks: 5 executed
