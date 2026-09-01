@@ -1,0 +1,98 @@
+name: apply-forge-packaged-runtime-r4
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - ci/apply-forge-packaged-runtime-r4.ready
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-forge-packaged-runtime-r4
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: forge-1.19.2
+          fetch-depth: 0
+
+      - name: Wait for storage/native contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          ready=false
+          for _ in $(seq 1 360); do
+            git fetch origin forge-1.19.2
+            git reset --hard origin/forge-1.19.2
+            if grep -Fq 'forge-1.19.2-r3.' PORTING.md \
+               && test -f src/test/java/me/cortex/voxy/common/storage/NativeStorageDependencyTest.java \
+               && grep -Fq 'lwjglVoxyNatives' build.gradle; then
+              ready=true
+              break
+            fi
+            sleep 10
+          done
+          test "$ready" = true
+
+      - name: Apply installed-artifact contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f ci/run-packaged-forge-smoke.sh
+          python3 ci/apply-forge-packaged-runtime-r4.py
+          rm -f ci/apply-forge-packaged-runtime-r4.py
+          rm -f ci/apply-forge-packaged-runtime-r4.ready
+          rm -f .github/workflows/apply-forge-packaged-runtime-r4.yml
+
+      - name: Test, build, and verify package metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon clean test build jarJar
+          jar_file="$(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print -quit)"
+          test -n "$jar_file"
+          unzip -p "$jar_file" META-INF/mods.toml | grep -F 'displayTest="IGNORE_SERVER_VERSION"'
+          test -f ci/run-packaged-forge-smoke.sh
+
+      - name: Commit with retry-on-race
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'test: validate the installed Forge artifact end to end'
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:forge-1.19.2; then
+              exit 0
+            fi
+            git fetch origin forge-1.19.2
+            git rebase origin/forge-1.19.2
+            ./gradlew --no-daemon test build jarJar
+            sleep $((attempt * 2))
+          done
+          exit 1
+
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apply-forge-packaged-runtime-r4-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            build/reports/tests/
+            build/test-results/
+            build/tmp/compileJava/
+            build/libs/
+            ci/
