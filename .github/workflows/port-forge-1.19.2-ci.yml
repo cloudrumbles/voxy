@@ -33,8 +33,8 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          mkdir -p build/ci
-          ./gradlew --no-daemon clean test build 2>&1 | tee build/ci/gradle.log
+          mkdir -p ci
+          ./gradlew --no-daemon clean test build 2>&1 | tee ci/gradle.log
 
       - name: Verify Forge metadata and complete renderer
         shell: bash
@@ -60,7 +60,7 @@ jobs:
           name: forge-1.19.2-diagnostics
           if-no-files-found: ignore
           path: |
-            build/ci/
+            ci/
             build/reports/
             build/test-results/
             build/tmp/
