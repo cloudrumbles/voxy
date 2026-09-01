@@ -32,10 +32,17 @@ jobs:
           cache-read-only: ${{ github.event_name == 'pull_request' }}
 
       - name: Unit and parity tests
-        run: ./gradlew --no-daemon clean test
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci
+          ./gradlew --no-daemon clean test 2>&1 | tee ci/test.log
 
       - name: Forge build and reobfuscation
-        run: ./gradlew --no-daemon build jarJar
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon build jarJar 2>&1 | tee ci/build.log
 
       - name: Verify packaged metadata
         shell: bash
@@ -47,15 +54,22 @@ jobs:
           jar tf "$jar_file" | grep -qx 'client.voxy.mixins.json'
           jar tf "$jar_file" | grep -qx 'client.voxy.refmap.json'
           jar tf "$jar_file" | grep -qx 'META-INF/accesstransformer.cfg'
+          jar tf "$jar_file" | grep -q '^me/cortex/voxy/client/core/VoxyRenderSystem.class$'
           unzip -p "$jar_file" META-INF/mods.toml | grep -F '[1.19.2,1.20)'
           unzip -p "$jar_file" META-INF/mods.toml | grep -F '[43,)'
+          if grep -R --line-number --fixed-strings 'VoxyRenderSystem (stub)' src/main/java; then
+            echo 'stub renderer detected' >&2
+            exit 1
+          fi
 
       - name: Upload diagnostic reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: forge-1.19.2-diagnostics
+          if-no-files-found: error
           path: |
+            ci/
             build/reports/tests/
             build/test-results/
             build/tmp/compileJava/
