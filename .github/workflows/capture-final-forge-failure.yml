@@ -1,0 +1,100 @@
+name: capture-final-forge-failure
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - ci/capture-final-forge-failure.ready
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: capture-final-forge-failure
+  cancel-in-progress: false
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 190
+    steps:
+      - name: Wait for v6 validation completion
+        id: final
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id=''
+          conclusion=''
+          for _ in $(seq 1 1080); do
+            line="$(gh run list --repo "$GITHUB_REPOSITORY" \
+              --workflow validate-release-forge-1.19.2-v6.yml \
+              --limit 1 \
+              --json databaseId,status,conclusion \
+              --jq '.[0] | [.databaseId,.status,.conclusion] | @tsv' 2>/dev/null || true)"
+            if [[ -n "$line" ]]; then
+              IFS=$'\t' read -r run_id status conclusion <<< "$line"
+              if [[ "$status" == completed ]]; then
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test -n "$run_id"
+          test -n "$conclusion"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+
+      - name: Download failed validation artifact
+        if: ${{ steps.final.outputs.conclusion != 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ steps.final.outputs.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/final-forge-artifacts
+          mkdir -p /tmp/final-forge-artifacts
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --dir /tmp/final-forge-artifacts
+          failure="$(find /tmp/final-forge-artifacts -type f -name FAILURE.txt -print -quit)"
+          test -n "$failure"
+          cp "$failure" /tmp/v6-latest-failure.txt
+          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs \
+            > /tmp/v6-jobs.json
+
+      - name: Check out current branch
+        if: ${{ steps.final.outputs.conclusion != 'success' }}
+        uses: actions/checkout@v4
+        with:
+          ref: forge-1.19.2
+          fetch-depth: 0
+
+      - name: Publish fixed-path failure evidence
+        if: ${{ steps.final.outputs.conclusion != 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin forge-1.19.2
+          git reset --hard origin/forge-1.19.2
+          cp /tmp/v6-latest-failure.txt ci/v6-latest-failure.txt
+          cp /tmp/v6-jobs.json ci/v6-latest-jobs.json
+          rm -f ci/capture-final-forge-failure.ready
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f ci/v6-latest-failure.txt ci/v6-latest-jobs.json
+          git add -u ci/capture-final-forge-failure.ready
+          git commit -m 'ci: capture final Forge validation failure [skip ci]'
+          for attempt in 1 2 3 4 5; do
+            if git push origin HEAD:forge-1.19.2; then
+              exit 0
+            fi
+            git fetch origin forge-1.19.2
+            git rebase origin/forge-1.19.2
+            sleep $((attempt * 2))
+          done
+          exit 1
