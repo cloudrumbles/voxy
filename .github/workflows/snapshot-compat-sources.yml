@@ -1,0 +1,33 @@
+name: snapshot-compat-sources
+
+on:
+  push:
+    branches:
+      - port/forge-1.19.2
+    paths:
+      - .github/workflows/snapshot-compat-sources.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Clone public 1.19.2 compatibility sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 19.2/modernized https://github.com/FiniteReality/embeddium.git embeddium
+          git clone --depth 1 --branch 1.19.2 https://github.com/Asek3/Oculus.git oculus
+          rm -rf embeddium/.git oculus/.git
+          tar -czf compat-sources.tar.gz embeddium oculus
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-1.19.2-compat-sources
+          path: compat-sources.tar.gz
+          if-no-files-found: error
