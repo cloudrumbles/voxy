@@ -40,6 +40,22 @@ jobs:
             README.md
             LICENSE.md
 
+      - name: Check out Forge 1.20.1 reference port
+        uses: actions/checkout@v4
+        with:
+          repository: realBritakee/voxy-neoforge
+          ref: mc_1201
+          path: ci/reference-1.20.1
+          fetch-depth: 1
+
+      - name: Upload Forge reference snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: voxy-forge-1.20.1-reference-${{ github.run_id }}
+          retention-days: 1
+          include-hidden-files: true
+          path: ci/reference-1.20.1/
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
