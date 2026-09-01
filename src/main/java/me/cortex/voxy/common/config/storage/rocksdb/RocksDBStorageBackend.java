@@ -1,6 +1,7 @@
 package me.cortex.voxy.common.config.storage.rocksdb;
 
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
+import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.config.ConfigBuildCtx;
 import me.cortex.voxy.common.config.storage.StorageBackend;
 import me.cortex.voxy.common.config.storage.StorageConfig;
@@ -11,6 +12,8 @@ import org.lwjgl.system.MemoryUtil;
 import org.rocksdb.*;
 
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -27,29 +30,20 @@ public class RocksDBStorageBackend extends StorageBackend {
     private final List<AbstractImmutableNativeReference> closeList = new ArrayList<>();
 
     public RocksDBStorageBackend(String path) {
-        /*
-        var lockPath = new File(path).toPath().resolve("LOCK");
+        // 1.20.1 移植:清理上次异常退出可能遗留的 RocksDB LOCK 文件,
+        // 避免 RocksDB.open 因锁冲突失败或阻塞。原逻辑被注释,此处恢复。
+        Path lockPath = Path.of(path).resolve("LOCK");
         if (Files.exists(lockPath)) {
-            System.err.println("WARNING, deleting rocksdb LOCK file");
-            int attempts = 10;
-            while (attempts-- != 0) {
-                try {
-                    Files.delete(lockPath);
-                    break;
-                } catch (IOException e) {
-                    try {
-                        Thread.sleep(1000);
-                    } catch (InterruptedException ex) {
-                        throw new RuntimeException(ex);
-                    }
-                }
-            }
-            if (Files.exists(lockPath)) {
-                throw new RuntimeException("Unable to delete rocksdb lock file");
+            Logger.warn("Found leftover RocksDB LOCK file at " + lockPath + ", deleting (previous session may have crashed)");
+            try {
+                Files.delete(lockPath);
+            } catch (Exception e) {
+                Logger.error("Failed to delete leftover RocksDB LOCK file: " + lockPath, e);
             }
         }
-         */
+        long __loadStart = System.nanoTime();
         RocksDB.loadLibrary();
+        Logger.info("RocksDB.loadLibrary took " + ((System.nanoTime() - __loadStart) / 1_000_000) + "ms");
 
         //TODO: FIXME: DONT USE THE SAME options PER COLUMN FAMILY
         final ColumnFamilyOptions cfOpts = new ColumnFamilyOptions()
@@ -62,7 +56,8 @@ public class RocksDBStorageBackend extends StorageBackend {
                 .setLevelCompactionDynamicLevelBytes(true)
                 .optimizeForPointLookup(128);
 
-        var bCache = new HyperClockCache(128*1024L*1024L,0, 4, false);
+        // 1.20.1 rocksdbjni 7.10.2 没有 HyperClockCache,用 ClockCache 替代 (构造器不同)
+        var bCache = new ClockCache(128*1024L*1024L, 4, false);
         var filter = new BloomFilter(10);
         cfWorldSecOpts.setTableFormatConfig(new BlockBasedTableConfig()
                 .setCacheIndexAndFilterBlocksWithHighPriority(true)
@@ -91,9 +86,11 @@ public class RocksDBStorageBackend extends StorageBackend {
 
         try {
 
+            long __openStart = System.nanoTime();
             this.db = RocksDB.open(options,
                     path, cfDescriptors,
                     handles);
+            Logger.info("RocksDB.open took " + ((System.nanoTime() - __openStart) / 1_000_000) + "ms for path: " + path);
 
             this.sectionReadOps = new ReadOptions();
             this.sectionWriteOps = new WriteOptions();
@@ -271,13 +268,8 @@ public class RocksDBStorageBackend extends StorageBackend {
     }
 
     private static long swizzlePos(long key) {
-        if (true) {
-            return key;
-        }
-        if (WorldEngine.POS_FORMAT_VERSION != 1) throw new IllegalStateException("TODO: UPDATE THIS");
-        return  (key&(0xFL<<60)) |
-                Long.expand((key>>> 4)&((1L<<24)-1), 0b01010101010101010101010101010101_001001001001001001001001L) |
-                Long.expand((key>>>52)&0xFF,         0b00000000000000000000000000000000_100100100100100100100100L) |
-                Long.expand((key>>>28)&((1L<<24)-1), 0b10101010101010101010101010101010_010010010010010010010010L);
+        // 1.20.1: Java 17 没有 Long.expand,且原代码 if(true) return key; 永远不会执行后续逻辑,
+        // 因此直接返回 key,删除死代码以避免编译错误。
+        return key;
     }
 }

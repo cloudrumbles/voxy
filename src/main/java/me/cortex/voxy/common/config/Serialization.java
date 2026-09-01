@@ -6,7 +6,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonWriter;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.commonImpl.VoxyCommon;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraftforge.fml.ModList;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -17,6 +17,8 @@ import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -96,8 +98,12 @@ public class Serialization {
         Map<Class<?>, GsonConfigSerialization<?>> serializers = new HashMap<>();
 
         Set<String> clazzs = new LinkedHashSet<>();
-        var path = FabricLoader.getInstance().getModContainer("voxy").get().getRootPaths().get(0);
-        clazzs.addAll(collectAllClasses(path, BASE_SEARCH_PACKAGE));
+        // Forge 中 mod jar 的根路径通过 ModList -> ModFile 获取
+        var modFile = ModList.get().getModFileById("voxy");
+        if (modFile != null) {
+            var path = modFile.getFile().getFilePath();
+            clazzs.addAll(collectAllClasses(path, BASE_SEARCH_PACKAGE));
+        }
         clazzs.addAll(collectAllClasses(BASE_SEARCH_PACKAGE));
         int count = 0;
         outer:
@@ -189,6 +195,11 @@ public class Serialization {
         }
     }
     private static List<String> collectAllClasses(Path base, String pack) {
+        // Forge 中 mod jar 可能是一个 zip 文件路径,需要特殊处理
+        if (Files.isRegularFile(base) && base.toString().endsWith(".jar")) {
+            return collectAllClassesFromJar(base, pack);
+        }
+
         if (!Files.exists(base.resolve(pack.replaceAll("[.]", "/")))) {
             return List.of();
         }
@@ -205,5 +216,24 @@ public class Serialization {
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    private static List<String> collectAllClassesFromJar(Path jarPath, String pack) {
+        List<String> result = new ArrayList<>();
+        String prefix = pack.replace(".", "/") + "/";
+        try (JarFile jarFile = new JarFile(jarPath.toFile())) {
+            Enumeration<JarEntry> entries = jarFile.entries();
+            while (entries.hasMoreElements()) {
+                JarEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (name.startsWith(prefix) && name.endsWith(".class")) {
+                    String className = name.substring(0, name.length() - 6).replace("/", ".");
+                    result.add(className);
+                }
+            }
+        } catch (IOException e) {
+            Logger.error("Failed to collect classes from jar: " + jarPath, e);
+        }
+        return result;
     }
 }

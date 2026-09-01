@@ -4,12 +4,11 @@ import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
-import me.cortex.voxy.client.core.NormalRenderPipeline;
 import me.cortex.voxy.client.core.SSAO;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.util.cpu.CpuLayout;
 import me.cortex.voxy.commonImpl.VoxyCommon;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraftforge.fml.loading.FMLPaths;
 
 import java.io.FileReader;
 import java.io.IOException;
@@ -27,39 +26,38 @@ public class VoxyConfig {
 
     public static VoxyConfig CONFIG = loadOrCreate();
 
+    /**
+     * 在 VoxyCommon.setInstanceFactory 调用后重新加载配置。
+     *
+     * VoxyConfig 的静态初始化 (loadOrCreate) 可能在 setInstanceFactory 之前执行
+     * (例如被 Mixin 类首次引用),此时 VoxyCommon.isAvailable() 返回 false,
+     * 导致配置不写入磁盘且 enabled/enableRendering 被强制设为 false。
+     *
+     * 此方法在 factory 注册完成后调用,确保配置从磁盘正确加载或创建。
+     */
+    public static void reload() {
+        CONFIG = loadOrCreate();
+    }
+
     public boolean enabled = true;
     public boolean enableRendering = true;
     public boolean ingestEnabled = true;
     public float sectionRenderDistance = 16;
     public int serviceThreads = (int) Math.max(CpuLayout.getCoreCount()/1.5, 1);
     public float subDivisionSize = 64;
-    public String fogMode;
+    public boolean useEnvironmentalFog = true;
     public boolean dontUseSodiumBuilderThreads = false;
     public String ssaoMode;
 
     public SSAO.SSAOMode getSSAOMode() {
-        var DEFAULT = SSAO.SSAOMode.AUTO;
-        if (this.ssaoMode == null) return DEFAULT;
+        if (this.ssaoMode == null) return SSAO.SSAOMode.AUTO;
         try {
             return SSAO.SSAOMode.valueOf(this.ssaoMode.toUpperCase(Locale.ROOT));
-        } catch (Exception e) { return DEFAULT; }
+        } catch (Exception e) { return SSAO.SSAOMode.AUTO; }
     }
 
     public void setSSAOMode(SSAO.SSAOMode mode) {
         this.ssaoMode = mode.name().toLowerCase(Locale.ROOT);
-    }
-
-
-    public NormalRenderPipeline.FogMode getFogMode() {
-        var DEFAULT = NormalRenderPipeline.FogMode.FOG_AND_FADE;
-        if (this.fogMode == null) return DEFAULT;
-        try {
-            return NormalRenderPipeline.FogMode.valueOf(this.fogMode.toUpperCase(Locale.ROOT));
-        } catch (Exception e) { return DEFAULT;}
-    }
-
-    public void setFogMode(NormalRenderPipeline.FogMode mode) {
-        this.fogMode = mode.name().toLowerCase(Locale.ROOT);
     }
 
 
@@ -109,8 +107,7 @@ public class VoxyConfig {
     }
 
     private static Path getConfigPath() {
-        return FabricLoader.getInstance()
-                .getConfigDir()
+        return FMLPaths.CONFIGDIR.get()
                 .resolve("voxy-config.json");
     }
 
