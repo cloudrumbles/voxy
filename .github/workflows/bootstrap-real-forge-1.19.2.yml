@@ -1,0 +1,149 @@
+name: bootstrap-real-forge-1.19.2
+
+on:
+  push:
+    branches:
+      - port/forge-1.19.2
+    paths:
+      - .github/workflows/bootstrap-real-forge-1.19.2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  import-renderer-baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out working branch
+        uses: actions/checkout@v4
+        with:
+          ref: port/forge-1.19.2
+          fetch-depth: 0
+
+      - name: Import complete Forge 1.20.1 implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch forge-1.20.1-sp \
+            https://github.com/ACowAdonis/voxy.git \
+            /tmp/voxy-forge-1.20.1
+          rsync -a --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            /tmp/voxy-forge-1.20.1/ "$PWD/"
+
+      - name: Retarget build and metadata to Forge 1.19.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          def set_property(text: str, key: str, value: str) -> str:
+              pattern = rf"(?m)^{re.escape(key)}\s*=.*$"
+              replacement = f"{key}={value}"
+              if re.search(pattern, text):
+                  return re.sub(pattern, replacement, text)
+              return text.rstrip() + "\n" + replacement + "\n"
+
+          props_path = Path("gradle.properties")
+          props = props_path.read_text(encoding="utf-8")
+          props = re.sub(r"(?m)^org\.gradle\.java\.home=.*\n?", "", props)
+          props = set_property(props, "minecraft_version", "1.19.2")
+          props = set_property(props, "forge_version", "43.5.2")
+          props = set_property(props, "mod_version", "0.2.11-alpha-forge-1.19.2")
+          props = set_property(props, "archives_base_name", "voxy-forge-1.19.2")
+          props_path.write_text(props, encoding="utf-8")
+
+          build_path = Path("build.gradle")
+          build = build_path.read_text(encoding="utf-8")
+          build = build.replace(
+              'modImplementation files("/home/acow/embeddium-au-naturel/build/libs/embeddium-0.3.32-beta.9999+mc1.20.1.jar")',
+              'modImplementation "maven.modrinth:sk9rgfiA:AYqEbec0"',
+          )
+          build = build.replace(
+              'modCompileOnly files("/home/acow/oculus-au-naturel/build/libs/oculus-mc1.20.1-1.8.1.jar")',
+              'modCompileOnly "maven.modrinth:GchcoXML:Mw8aFpWF"',
+          )
+          build = build.replace(
+              'modCompileOnly files("/home/acow/DynamicTrees-Au-Naturel/build/libs/DynamicTrees-1.20.1-1.4.10.jar")',
+              'modCompileOnly "maven.modrinth:vdjF5PL5:byXgtF59"',
+          )
+          build = build.replace(
+              'modCompileOnly("maven.modrinth:chunky:1.3.92")',
+              'modCompileOnly "curse.maven:chunky-pregenerator-forge-485681:3970964"',
+          )
+          build = build.replace('def targetJavaVersion = 21', 'def targetJavaVersion = 17')
+          build = build.replace('JavaVersion.VERSION_21', 'JavaVersion.VERSION_17')
+          build = build.replace(
+              'mavenCentral()\n}',
+              'mavenCentral()\n    maven { url = "https://www.cursemaven.com" }\n}',
+              1,
+          )
+          if "org.junit.jupiter:junit-jupiter" not in build:
+              anchor = '    forge "net.minecraftforge:forge:${project.minecraft_version}-${project.forge_version}"\n'
+              build = build.replace(
+                  anchor,
+                  anchor
+                  + '\n    testImplementation platform("org.junit:junit-bom:5.10.3")\n'
+                  + '    testImplementation "org.junit.jupiter:junit-jupiter"\n'
+                  + '    testRuntimeOnly "org.junit.platform:junit-platform-launcher"\n',
+              )
+          if "useJUnitPlatform()" not in build:
+              anchor = "java {\n"
+              build = build.replace(
+                  anchor,
+                  'tasks.withType(Test).configureEach {\n'
+                  '    useJUnitPlatform()\n'
+                  '    maxHeapSize = "2G"\n'
+                  '}\n\n'
+                  + anchor,
+                  1,
+              )
+          build_path.write_text(build, encoding="utf-8")
+
+          mods_path = Path("src/main/resources/META-INF/mods.toml")
+          mods = mods_path.read_text(encoding="utf-8")
+          mods = mods.replace('loaderVersion = "[47,)"', 'loaderVersion = "[43,)"')
+          mods = mods.replace('versionRange = "[47,)"', 'versionRange = "[43,)"')
+          mods = mods.replace('versionRange = "[1.20.1,1.20.2)"', 'versionRange = "[1.19.2,1.20)"')
+          mods_path.write_text(mods, encoding="utf-8")
+
+          Path("src/main/resources/pack.mcmeta").write_text(
+              '{\n'
+              '  "pack": {\n'
+              '    "description": "Voxy resources",\n'
+              '    "pack_format": 9\n'
+              '  }\n'
+              '}\n',
+              encoding="utf-8",
+          )
+
+          Path("PORTING.md").write_text(
+              "# Forge 1.19.2 port\n\n"
+              "This branch ports the complete Forge renderer from "
+              "ACowAdonis/voxy commit 8285ecccf3d296f40d9b500a70aab2ca90affe2a "
+              "to Minecraft 1.19.2, Forge 43.5.2, and Java 17.\n\n"
+              "The port must preserve persistent formats, coordinate packing, voxel and mip "
+              "layouts, renderer inputs, configuration defaults, and lifecycle semantics. "
+              "Loader- and Minecraft-version-specific adapters may differ.\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Commit imported source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No import changes to commit"
+            exit 0
+          fi
+          git commit -m "port: import complete Forge renderer baseline"
+          git push origin HEAD:port/forge-1.19.2
