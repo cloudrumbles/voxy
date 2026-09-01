@@ -39,12 +39,12 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install software OpenGL runtime
+      - name: Install software OpenGL and client native runtime
         shell: bash
         run: |
           sudo apt-get update -qq
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0
+            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0 flite1-dev
 
       - name: Build, test, and reobfuscate
         shell: bash
