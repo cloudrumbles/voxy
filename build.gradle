@@ -126,7 +126,7 @@ dependencies {
     // 注意: Forge JarJar 要求版本范围格式 (Maven range),不能直接用纯版本号
     // 同时用 implementation 保证在编译类路径上,jarJar 保证打包进 jar
     //
-    // ⚠️ lwjgl 核心 (org.lwjgl:lwjgl) 不能 jarJar 内嵌: MC 1.20.1 自带 LWJGL 3.3.1,
+    // ⚠️ lwjgl 核心 (org.lwjgl:lwjgl) 不能 jarJar 内嵌: MC 1.19.2 自带 LWJGL 3.3.1,
     //    内嵌会导致 JPMS split package 冲突 (Modules lwjgl and org.lwjgl export package ...)。
     //    只内嵌 MC 不提供的子模块 lwjgl-lmdb 和 lwjgl-zstd。
     //    lwjgl 核心用 compileOnly 保证编译期可用,运行期由 MC 提供。
@@ -151,7 +151,7 @@ dependencies {
     jarJar(implementation('org.apache.commons:commons-pool2:[2.12.0,3.0)')) {
         version { strictly '[2.12.0,3.0)'; prefer '2.12.0' }
     }
-    // lz4-java: Forge 1.20.1 自带 at.yawk.lz4:lz4-java (提供 org.lz4:lz4-java capability),
+    // lz4-java: Forge 1.19.2 自带 at.yawk.lz4:lz4-java (提供 org.lz4:lz4-java capability),
     // 与 org.lz4:lz4-java 冲突。由于 API 兼容 (都用 net.jpountz.lz4 包),
     // 改用 at.yawk.lz4:lz4-java 避免冲突,并 jarJar 打包运行时。
     jarJar(implementation('at.yawk.lz4:lz4-java:[1.8.1,2.0)')) {
@@ -164,7 +164,7 @@ dependencies {
         version { strictly '[3.42.0.0,4.0)'; prefer '3.42.0.0' }
     }
 
-    // Mixin annotation processor,用于生成 refmap (Forge 1.20.1 运行期 SRG 映射需要)
+    // Mixin annotation processor,用于生成 Forge 1.19.2 运行时 SRG 映射所需的 refmap
     compileOnly 'org.spongepowered:mixin:0.8.5'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
     testImplementation platform('org.junit:junit-bom:5.10.3')
@@ -221,7 +221,7 @@ tasks.named('jarJar').configure {
     dependsOn(tasks.compileJava)
 }
 
-// Mixin Gradle 插件: 为 Forge 1.20.1 运行时 SRG 映射生成 refmap,
+// Mixin Gradle 插件: 为 Forge 1.19.2 运行时 SRG 映射生成 refmap,
 // 否则 mixin 注入点使用开发期 official 映射名,运行时找不到目标方法。
 mixin {
     add sourceSets.main, 'client.voxy.refmap.json'
@@ -238,7 +238,11 @@ java {
 }
 
 jar {
-    from('LICENSE') {
+    // MixinGradle and processed resources both contribute the generated refmap.
+    // Keep one deterministic copy so the ordinary `build` lifecycle works.
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from('LICENSE.md') {
         rename { "${it}_${project.archives_base_name}" }
     }
     manifest {
