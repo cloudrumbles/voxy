@@ -1,15 +1,13 @@
 buildscript {
     repositories {
-        mavenLocal()
-        maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
-        maven { url = 'https://mirrors.cloud.tencent.com/maven/' }
+        maven { url = 'https://maven.minecraftforge.net/' }
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
         mavenCentral()
         gradlePluginPortal()
-        maven { url = 'https://maven.minecraftforge.net/' }
     }
     dependencies {
         classpath 'net.minecraftforge.gradle:ForgeGradle:6.0.54'
-        classpath 'org.spongepowered:mixingradle:0.7.+'
+        classpath 'org.spongepowered:mixingradle:0.7.38'
     }
 }
 
@@ -49,7 +47,6 @@ minecraft {
             workingDirectory project.file('run')
             property 'forge.logging.markers', 'REGISTRIES'
             property 'forge.logging.console.level', 'debug'
-            jvmArgs '-XX:-UseContainerSupport'
             mods {
                 voxy {
                     source sourceSets.main
@@ -70,19 +67,9 @@ minecraft {
 }
 
 repositories {
-    mavenLocal()
-    maven { url = 'https://mirrors.huaweicloud.com/repository/maven/' }
-    maven { url = 'https://mirrors.cloud.tencent.com/repository/maven/' }
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com/' }
-    maven { url = 'https://maven.florens.be' }
-    maven {
-        name = 'Modrinth'
-        url = 'https://api.modrinth.com/maven'
-        content { includeGroup 'maven.modrinth' }
-    }
-    maven { url = 'https://maven.parchmentmc.org/' }
 }
 
 dependencies {
@@ -92,10 +79,7 @@ dependencies {
     // used by this backport.
     implementation fg.deobf("org.embeddedt:embeddium-1.19.2:${embeddium_version}")
 
-    if (project.hasProperty('runtimeSmoke')) {
-        runtimeOnly fg.deobf('be.florens:autoload-forge:1.1.3')
-    }
-
+    // Minecraft 1.19.2 and the selected Embeddium build use JOML 1.10.5.
     compileOnly 'org.joml:joml:1.10.5'
 
     compileOnly "io.github.llamalad7:mixinextras-common:${mixin_extras_version}"
