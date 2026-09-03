@@ -221,10 +221,12 @@ tasks.named('jarJar').configure {
     dependsOn(tasks.compileJava)
 }
 
-// Mixin Gradle 插件: 为 Forge 1.19.2 运行时 SRG 映射生成 refmap,
-// 否则 mixin 注入点使用开发期 official 映射名,运行时找不到目标方法。
+// Mixin Gradle plugin writes its config list into the Forge JAR manifest.
+// Forge 1.19.2 loads that manifest attribute; mods.toml mixin declarations are
+// not sufficient on this loader line.
 mixin {
     add sourceSets.main, 'client.voxy.refmap.json'
+    config 'common.voxy.mixins.json'
     config 'client.voxy.mixins.json'
 }
 
