@@ -3,7 +3,6 @@ package me.cortex.voxy.client.core.gl.shader;
 import me.cortex.voxy.client.core.gl.Capabilities;
 import me.cortex.voxy.client.core.gl.GlDebug;
 import me.cortex.voxy.common.Logger;
-import me.cortex.voxy.common.util.ThreadUtils;
 import me.cortex.voxy.common.util.TrackedObject;
 import org.lwjgl.opengl.GL20C;
 import org.lwjgl.system.MemoryStack;
@@ -13,8 +12,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
+
+import org.lwjgl.system.Platform;
 
 import static org.lwjgl.opengl.GL20.glDeleteProgram;
 import static org.lwjgl.opengl.GL20.glUseProgram;
@@ -83,7 +83,6 @@ public class Shader extends TrackedObject {
             var clone = new Builder<>(this.constructor, this.processor);
             clone.defines.putAll(this.defines);
             clone.sources.putAll(this.sources);
-            clone.replacements.putAll(this.replacements);
             return clone;
         }
 
@@ -137,11 +136,6 @@ public class Shader extends TrackedObject {
             return this;
         }
 
-        public Builder<T> apply(Consumer<Builder<T>> applyer) {
-            applyer.accept(this);
-            return this;
-        }
-
 
         private int compileToProgram() {
             int program = GL20C.glCreateProgram();
@@ -180,7 +174,7 @@ public class Shader extends TrackedObject {
 
         public T compile() {
             this.defineIf("IS_INTEL", Capabilities.INSTANCE.isIntel);
-            this.defineIf("IS_WINDOWS", ThreadUtils.isWindows);
+            this.defineIf("IS_WINDOWS", Platform.get() == Platform.WINDOWS);
             return this.constructor.make(this, this.compileToProgram());
         }
 
@@ -202,7 +196,7 @@ public class Shader extends TrackedObject {
 
         private static int createShader(ShaderType type, String src) {
             int shader = GL20C.glCreateShader(type.gl);
-            {//https://github.com/CaffeineMC/sodium/blob/fc42a7b19836c98a35df46e63303608de0587ab6/src/main/java/me/jellysquid/mods/sodium/client/gl/shader/ShaderWorkarounds.java
+            {//https://github.com/CaffeineMC/sodium/blob/fc42a7b19836c98a35df46e63303608de0587ab6/src/main/java/net/caffeinemc/mods/sodium/client/gl/shader/ShaderWorkarounds.java
                 long ptr = MemoryUtil.memAddress(MemoryUtil.memUTF8(src, true));
                 try (var stack = MemoryStack.stackPush()) {
                     GL20C.nglShaderSource(shader, 1, stack.pointers(ptr).address0(), 0);

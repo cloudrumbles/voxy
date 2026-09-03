@@ -3,15 +3,9 @@ package me.cortex.voxy.client.core.model;
 import me.cortex.voxy.client.core.RenderResourceReuse;
 import me.cortex.voxy.client.core.gl.GlBuffer;
 import me.cortex.voxy.client.core.gl.GlTexture;
-import me.cortex.voxy.common.util.GlobalCleaner;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.resources.Identifier;
 
-import java.lang.ref.Cleaner;
-
-import static org.lwjgl.opengl.GL11.GL_TEXTURE_MAG_FILTER;
-import static org.lwjgl.opengl.GL11.GL_TEXTURE_MIN_FILTER;
+import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL11C.GL_NEAREST;
 import static org.lwjgl.opengl.GL11C.GL_NEAREST_MIPMAP_LINEAR;
 import static org.lwjgl.opengl.GL12C.GL_TEXTURE_MAX_LOD;
@@ -24,7 +18,6 @@ import static org.lwjgl.opengl.GL45.glBindTextureUnit;
 
 public class ModelStore {
     public static final int MODEL_SIZE = 64;
-    private Cleaner.Cleanable ref;
     final GlBuffer modelBuffer;
     final GlBuffer modelColourBuffer;
     final GlTexture textures;
@@ -33,13 +26,13 @@ public class ModelStore {
     public ModelStore() {
         this.modelBuffer = new GlBuffer(MODEL_SIZE * (1<<16)).name("ModelData");
         this.modelColourBuffer = new GlBuffer(4 * (1<<16)).name("ModelColour");
-        var tex = this.textures = RenderResourceReuse.getOrCreateModelStoreTextureAtlas();
-        this.ref = GlobalCleaner.CLEANER.register(this, ()->RenderResourceReuse.giveBackModelStoreTextureAtlas(tex));
+        this.textures = RenderResourceReuse.getOrCreateModelStoreTextureAtlas();
 
         //Limit the mips of the texture to match that of the terrain atlas
-        int mipLvl = ((TextureAtlas) Minecraft.getInstance().getTextureManager()
-                .getTexture(Identifier.fromNamespaceAndPath("minecraft", "textures/atlas/blocks.png")))
-                .maxMipLevel;
+        int mipLvl = Math.min(
+                Minecraft.getInstance().options.mipmapLevels().get(),
+                Integer.numberOfTrailingZeros(ModelFactory.MODEL_TEXTURE_SIZE)
+        );
 
         glSamplerParameteri(this.blockSampler, GL_TEXTURE_MIN_FILTER, GL_NEAREST_MIPMAP_LINEAR);
         glSamplerParameteri(this.blockSampler, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -51,7 +44,7 @@ public class ModelStore {
     public void free() {
         this.modelBuffer.free();
         this.modelColourBuffer.free();
-        this.ref.clean();
+        RenderResourceReuse.giveBackModelStoreTextureAtlas(this.textures);
         glDeleteSamplers(this.blockSampler);
     }
 

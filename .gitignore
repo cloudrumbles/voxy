@@ -5,3 +5,7 @@
 /run/
 /out/
 /logs/
+/run-packaged-client/
+/run-packaged-server/
+/ci/packaged-runtime-smoke/
+/ci/*.log
