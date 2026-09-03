@@ -15,6 +15,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
 /**
@@ -28,6 +29,7 @@ public final class VoxyClientSmoke {
     private static final String PHASE = System.getProperty("voxy.smoke.phase", "")
             .trim().toLowerCase(Locale.ROOT);
     private static final AtomicBoolean REGISTERED = new AtomicBoolean();
+    private static final AtomicLong SUCCESSFUL_RENDER_PASSES = new AtomicLong();
 
     private static boolean completed;
     private static int ticks;
@@ -40,6 +42,16 @@ public final class VoxyClientSmoke {
     public static void register() {
         if (!PHASE.isEmpty() && REGISTERED.compareAndSet(false, true)) {
             MinecraftForge.EVENT_BUS.addListener(VoxyClientSmoke::onClientTick);
+        }
+    }
+
+    /**
+     * Records completion of the injected Voxy terrain pass. This is a no-op in
+     * ordinary installations because the smoke-test phase property is unset.
+     */
+    public static void recordSuccessfulRenderPass() {
+        if (isWorldPhase()) {
+            SUCCESSFUL_RENDER_PASSES.incrementAndGet();
         }
     }
 
@@ -72,6 +84,7 @@ public final class VoxyClientSmoke {
                 boolean instanceCreated = VoxyCommon.getInstance() instanceof VoxyClientInstance;
                 long successfulLoads = SectionSerializationStorage.getSuccessfulLoadCount();
                 long successfulSaves = SectionSerializationStorage.getSuccessfulSaveCount();
+                long successfulRenderPasses = SUCCESSFUL_RENDER_PASSES.get();
                 long currentPersistenceBytes = persistenceBytes(minecraft.gameDirectory.toPath());
 
                 boolean storageCondition;
@@ -84,8 +97,9 @@ public final class VoxyClientSmoke {
                 if (worldReadyTicks >= 100
                         && renderSystemCreated
                         && instanceCreated
+                        && successfulRenderPasses > 0L
                         && storageCondition) {
-                    succeed("world joined with a live Voxy renderer and verified section "
+                    succeed("world joined with a live Voxy renderer, a completed terrain pass, and verified section "
                             + ("world-write".equals(PHASE) ? "persistence writes" : "persistence reads"));
                     return;
                 }
@@ -147,6 +161,7 @@ public final class VoxyClientSmoke {
                 + "  \"worldJoined\": " + (minecraft.level != null && minecraft.player != null) + ",\n"
                 + "  \"instanceCreated\": " + (VoxyCommon.getInstance() instanceof VoxyClientInstance) + ",\n"
                 + "  \"renderSystemCreated\": " + renderSystemCreated + ",\n"
+                + "  \"successfulRenderPasses\": " + SUCCESSFUL_RENDER_PASSES.get() + ",\n"
                 + "  \"sectionLoadAttempts\": " + SectionSerializationStorage.getLoadAttemptCount() + ",\n"
                 + "  \"successfulSectionLoads\": " + SectionSerializationStorage.getSuccessfulLoadCount() + ",\n"
                 + "  \"successfulSectionSaves\": " + SectionSerializationStorage.getSuccessfulSaveCount() + ",\n"
