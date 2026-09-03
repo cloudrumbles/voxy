@@ -1,6 +1,7 @@
 package me.cortex.voxy.client.mixin.sodium;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import me.cortex.voxy.client.VoxyClientSmoke;
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.client.core.rendering.Viewport;
 import me.cortex.voxy.client.core.util.IrisUtil;
@@ -60,5 +61,6 @@ public class MixinSodiumWorldRenderer {
             viewport = renderer.setupViewport(matrices, cameraX, cameraY, cameraZ);
         }
         renderer.renderOpaque(viewport);
+        VoxyClientSmoke.recordSuccessfulRenderPass();
     }
 }
