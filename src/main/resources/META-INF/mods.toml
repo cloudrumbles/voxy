@@ -1,0 +1,47 @@
+modLoader = "javafml"
+loaderVersion = "${loader_version_range}"
+license = "All-Rights-Reserved"
+issueTrackerURL = "https://github.com/MCRcortex/voxy/issues"
+
+[[mods]]
+modId = "voxy"
+version = "${mod_version}"
+displayName = "Voxy"
+authors = "Cortex"
+displayTest = "IGNORE_SERVER_VERSION"
+description = '''
+Far distance rendering mod utilising LoDs.
+Backported to Forge 1.19.2 with parity tests for stable core behaviour.
+'''
+
+[[dependencies.voxy]]
+    modId = "forge"
+    mandatory = true
+    versionRange = "${forge_version_range}"
+    ordering = "NONE"
+    side = "BOTH"
+
+[[dependencies.voxy]]
+    modId = "minecraft"
+    mandatory = true
+    versionRange = "${minecraft_version_range}"
+    ordering = "NONE"
+    side = "BOTH"
+
+# This backport integrates directly with the modernized 1.19.2 Embeddium
+# renderer API. Public older builds and unvalidated future builds expose a
+# different internal layout, so the tested version is intentionally exact.
+[[dependencies.voxy]]
+    modId = "embeddium"
+    mandatory = true
+    versionRange = "[0.3.32-beta.90+mc1.19.2]"
+    ordering = "AFTER"
+    side = "CLIENT"
+
+# Forge 1.19.2 includes the Mixin bootstrap. The common configuration supplies
+# world identity and shared hooks; the client configuration supplies rendering.
+[[mixins]]
+    config = "common.voxy.mixins.json"
+
+[[mixins]]
+    config = "client.voxy.mixins.json"

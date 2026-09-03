@@ -1,0 +1,72 @@
+{
+  "mappings": {
+    "me/cortex/voxy/client/mixin/minecraft/MixinFogRenderer": {
+      "setupFog(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/FogRenderer$FogMode;FZF)V": "Lnet/minecraft/client/renderer/FogRenderer;m_234172_(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/FogRenderer$FogMode;FZF)V"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/MixinDebugScreenOverlay": {
+      "getGameInformation": "Lnet/minecraft/client/gui/components/DebugScreenOverlay;m_94075_()Ljava/util/List;"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/MixinClientLevel": {
+      "setBlocksDirty": "Lnet/minecraft/client/multiplayer/ClientLevel;m_6550_(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/block/state/BlockState;)V"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/MixinClientPacketListener": {
+      "handleLogin": "Lnet/minecraft/client/multiplayer/ClientPacketListener;m_5998_(Lnet/minecraft/network/protocol/game/ClientboundLoginPacket;)V"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/MixinWindow": {
+      "Lcom/mojang/blaze3d/platform/Window;setBootErrorCallback()V": "Lcom/mojang/blaze3d/platform/Window;m_85451_()V"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/AccessorLightTexture": {
+      "lightTexture": "f_109870_:Lnet/minecraft/client/renderer/texture/DynamicTexture;"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/MixinLevelRenderer": {
+      "allChanged()V": "Lnet/minecraft/client/renderer/LevelRenderer;m_109818_()V",
+      "close": "Lnet/minecraft/client/renderer/LevelRenderer;close()V",
+      "setLevel": "Lnet/minecraft/client/renderer/LevelRenderer;m_109701_(Lnet/minecraft/client/multiplayer/ClientLevel;)V"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/MixinClientChunkCache": {
+      "drop": "Lnet/minecraft/client/multiplayer/ClientChunkCache;m_104455_(II)V"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/AccessorMinecraft": {
+      "fps": "f_91021_:I"
+    },
+    "me/cortex/voxy/client/mixin/minecraft/MixinMinecraft": {
+      "clearLevel()V": "Lnet/minecraft/client/Minecraft;m_91399_()V"
+    }
+  },
+  "data": {
+    "searge": {
+      "me/cortex/voxy/client/mixin/minecraft/MixinFogRenderer": {
+        "setupFog(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/FogRenderer$FogMode;FZF)V": "Lnet/minecraft/client/renderer/FogRenderer;m_234172_(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/FogRenderer$FogMode;FZF)V"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/MixinDebugScreenOverlay": {
+        "getGameInformation": "Lnet/minecraft/client/gui/components/DebugScreenOverlay;m_94075_()Ljava/util/List;"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/MixinClientLevel": {
+        "setBlocksDirty": "Lnet/minecraft/client/multiplayer/ClientLevel;m_6550_(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;Lnet/minecraft/world/level/block/state/BlockState;)V"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/MixinClientPacketListener": {
+        "handleLogin": "Lnet/minecraft/client/multiplayer/ClientPacketListener;m_5998_(Lnet/minecraft/network/protocol/game/ClientboundLoginPacket;)V"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/MixinWindow": {
+        "Lcom/mojang/blaze3d/platform/Window;setBootErrorCallback()V": "Lcom/mojang/blaze3d/platform/Window;m_85451_()V"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/AccessorLightTexture": {
+        "lightTexture": "f_109870_:Lnet/minecraft/client/renderer/texture/DynamicTexture;"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/MixinLevelRenderer": {
+        "allChanged()V": "Lnet/minecraft/client/renderer/LevelRenderer;m_109818_()V",
+        "close": "Lnet/minecraft/client/renderer/LevelRenderer;close()V",
+        "setLevel": "Lnet/minecraft/client/renderer/LevelRenderer;m_109701_(Lnet/minecraft/client/multiplayer/ClientLevel;)V"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/MixinClientChunkCache": {
+        "drop": "Lnet/minecraft/client/multiplayer/ClientChunkCache;m_104455_(II)V"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/AccessorMinecraft": {
+        "fps": "f_91021_:I"
+      },
+      "me/cortex/voxy/client/mixin/minecraft/MixinMinecraft": {
+        "clearLevel()V": "Lnet/minecraft/client/Minecraft;m_91399_()V"
+      }
+    }
+  }
+}
