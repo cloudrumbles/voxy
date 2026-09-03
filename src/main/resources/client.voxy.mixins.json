@@ -23,8 +23,7 @@
     "sodium.AccessorChunkTracker",
     "sodium.AccessorSodiumWorldRenderer",
     "sodium.MixinChunkJobQueue",
-    "sodium.MixinRenderSectionManager",
-    "sodium.MixinSodiumWorldRenderer"
+    "sodium.MixinRenderSectionManager"
   ],
   "injectors": {
     "defaultRequire": 1
