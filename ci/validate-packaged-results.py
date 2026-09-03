@@ -8,7 +8,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-EXPECTED_STORAGE_LEAF = "127.0.0.1_25565"
+# Minecraft/Netty may preserve the configured numeric loopback address or
+# expose its canonical localhost name. Both identify the same validation
+# endpoint; the contract is stable server isolation, not DNS spelling.
+EXPECTED_STORAGE_LEAVES = frozenset({"127.0.0.1_25565", "localhost_25565"})
 
 
 def fail(message: str) -> None:
@@ -46,6 +49,33 @@ def validate_common(data: dict[str, Any], phase: str, source: str) -> None:
         require_true(data, key, source)
 
 
+def validate_persistence_manifest(data: dict[str, Any], source: str, storage_leaf: str) -> None:
+    require_positive(data, "nonemptyFileCount", source)
+    require_positive(data, "totalBytes", source)
+
+    files = data.get("files")
+    if not isinstance(files, list) or not files:
+        fail(f"{source}: files was empty or invalid")
+    if len(files) != data["nonemptyFileCount"]:
+        fail(f"{source}: file count does not match nonemptyFileCount")
+
+    for entry in files:
+        if not isinstance(entry, dict):
+            fail(f"{source}: invalid file entry: {entry!r}")
+        relative_path = entry.get("path")
+        if not isinstance(relative_path, str) or not relative_path:
+            fail(f"{source}: invalid persisted path: {relative_path!r}")
+        path = Path(relative_path)
+        if not path.parts or path.parts[0] != storage_leaf:
+            fail(
+                f"{source}: persisted file escaped the validated server directory: "
+                f"{relative_path!r}"
+            )
+        size = entry.get("bytes")
+        if not isinstance(size, int) or size <= 0:
+            fail(f"{source}: non-positive persisted file size: {entry!r}")
+
+
 def main() -> None:
     report_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("ci/packaged-runtime-smoke")
     title = load_result(report_dir, "packaged-title.json")
@@ -58,6 +88,7 @@ def main() -> None:
     validate_common(write, "world-write", "packaged-world-write.json")
     validate_common(reopen, "world-reopen", "packaged-world-reopen.json")
 
+    storage_paths: list[Path] = []
     for source, data in (("packaged-world-write.json", write), ("packaged-world-reopen.json", reopen)):
         for key in ("worldJoined", "instanceCreated", "renderSystemCreated"):
             require_true(data, key, source)
@@ -67,25 +98,34 @@ def main() -> None:
         if not isinstance(raw_path, str) or not raw_path:
             fail(f"{source}: storageBasePath was empty")
         storage_path = Path(raw_path)
-        if storage_path.name != EXPECTED_STORAGE_LEAF:
+        storage_paths.append(storage_path)
+        if storage_path.name not in EXPECTED_STORAGE_LEAVES:
             fail(
                 f"{source}: direct-connect storage leaf was {storage_path.name!r}; "
-                f"expected {EXPECTED_STORAGE_LEAF!r}"
+                f"expected one of {sorted(EXPECTED_STORAGE_LEAVES)!r}"
             )
+        if storage_path.parent.name != "saves" or storage_path.parent.parent.name != ".voxy":
+            fail(f"{source}: storage path was outside the expected .voxy/saves root")
         if "UNKNOWN" in storage_path.parts:
             fail(f"{source}: direct-connect persistence used the shared UNKNOWN path")
 
-    if write["storageBasePath"] != reopen["storageBasePath"]:
+    if storage_paths[0] != storage_paths[1]:
         fail("storageBasePath changed across the full client restart")
+    storage_leaf = storage_paths[0].name
 
     require_positive(write, "successfulSectionSaves", "packaged-world-write.json")
     require_positive(write, "currentPersistenceBytes", "packaged-world-write.json")
     require_positive(reopen, "initialPersistenceBytes", "packaged-world-reopen.json")
     require_positive(reopen, "successfulSectionLoads", "packaged-world-reopen.json")
-    require_positive(before, "nonemptyFileCount", "persistence-before-reopen.json")
-    require_positive(before, "totalBytes", "persistence-before-reopen.json")
-    require_positive(after, "nonemptyFileCount", "persistence-after-reopen.json")
-    require_positive(after, "totalBytes", "persistence-after-reopen.json")
+
+    validate_persistence_manifest(before, "persistence-before-reopen.json", storage_leaf)
+    validate_persistence_manifest(after, "persistence-after-reopen.json", storage_leaf)
+
+    if reopen["initialPersistenceBytes"] != before["totalBytes"]:
+        fail(
+            "world-reopen did not observe the exact persistence snapshot created "
+            "by the first client process"
+        )
 
     print("packaged-client evidence satisfies the Forge 1.19.2 release contract")
 
