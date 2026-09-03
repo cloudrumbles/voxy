@@ -28,6 +28,15 @@ Backported to Forge 1.19.2 with parity tests for stable core behaviour.
     ordering = "NONE"
     side = "BOTH"
 
+# Voxy integrates directly with the modernized Embeddium renderer API. Older
+# public 1.19.2 builds expose a different binary layout and cannot load it.
+[[dependencies.voxy]]
+    modId = "embeddium"
+    mandatory = true
+    versionRange = "[0.3.32-beta.90,)"
+    ordering = "AFTER"
+    side = "CLIENT"
+
 # Forge 1.19.2 includes the Mixin bootstrap; declare Voxy's client mixins here.
 [[mixins]]
     config = "client.voxy.mixins.json"
