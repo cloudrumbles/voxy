@@ -205,7 +205,7 @@ tasks.named('jarJar').configure {
     from("${buildDir}/tmp/compileJava/compileJava-refmap.json") {
         rename { 'client.voxy.refmap.json' }
     }
-    from({ configurations.lwjglLmdbNatives.collect { zipTree(it) } }) {
+    from({ project.configurations.lwjglLmdbNatives.collect { project.zipTree(it) } }) {
         include 'linux/x64/org/lwjgl/lmdb/liblwjgl_lmdb.so'
         include 'windows/x64/org/lwjgl/lmdb/lwjgl_lmdb.dll'
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
