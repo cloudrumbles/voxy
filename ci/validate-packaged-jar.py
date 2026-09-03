@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
 from typing import Any
 
+EXPECTED_EMBEDDIUM_VERSION = "0.3.32-beta.90+mc1.19.2"
 EXPECTED_JARJAR_VERSIONS = {
     ("io.github.llamalad7", "mixinextras-forge"): "0.5.5",
     ("org.lwjgl", "lwjgl-lmdb"): "3.3.1",
@@ -46,6 +48,38 @@ def load_metadata(archive: zipfile.ZipFile) -> dict[str, Any]:
     return metadata
 
 
+def validate_embeddium_contract(archive: zipfile.ZipFile) -> None:
+    try:
+        mods_toml = archive.read("META-INF/mods.toml").decode("utf-8")
+    except KeyError:
+        fail("distributable JAR is missing META-INF/mods.toml")
+    except UnicodeDecodeError as exception:
+        fail(f"META-INF/mods.toml is not UTF-8: {exception}")
+
+    dependency_blocks = re.findall(
+        r"\[\[dependencies\.voxy\]\](.*?)(?=\[\[dependencies\.voxy\]\]|\[\[mixins\]\]|\Z)",
+        mods_toml,
+        flags=re.DOTALL,
+    )
+    embeddium_blocks = [
+        block for block in dependency_blocks
+        if re.search(r'^\s*modId\s*=\s*"embeddium"\s*$', block, flags=re.MULTILINE)
+    ]
+    if len(embeddium_blocks) != 1:
+        fail(f"expected one Embeddium dependency block, found {len(embeddium_blocks)}")
+
+    block = embeddium_blocks[0]
+    expected_range = f"[{EXPECTED_EMBEDDIUM_VERSION}]"
+    match = re.search(r'^\s*versionRange\s*=\s*"([^"]+)"\s*$', block, flags=re.MULTILINE)
+    if match is None or match.group(1) != expected_range:
+        actual = None if match is None else match.group(1)
+        fail(f"Embeddium version range was {actual!r}; expected {expected_range!r}")
+    if not re.search(r'^\s*mandatory\s*=\s*true\s*$', block, flags=re.MULTILINE):
+        fail("Embeddium dependency is not mandatory")
+    if not re.search(r'^\s*side\s*=\s*"CLIENT"\s*$', block, flags=re.MULTILINE):
+        fail("Embeddium dependency is not client-side")
+
+
 def main() -> None:
     if len(sys.argv) != 2:
         fail("usage: validate-packaged-jar.py <voxy-all.jar>")
@@ -61,6 +95,7 @@ def main() -> None:
 
     with archive:
         names = set(archive.namelist())
+        validate_embeddium_contract(archive)
         metadata = load_metadata(archive)
         actual: dict[tuple[str, str], dict[str, Any]] = {}
 
