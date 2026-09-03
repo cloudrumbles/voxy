@@ -80,7 +80,10 @@ public abstract class MixinLevelRenderer implements IGetVoxyRenderSystem {
 
         VoxyClientInstance instance = (VoxyClientInstance) VoxyCommon.getInstance();
         if (instance == null) {
-            Logger.error("Not creating renderer due to null instance");
+            // Minecraft performs one terrain reload before handleLogin finishes
+            // creating the Voxy client session. The login-tail hook calls this
+            // method again once the instance exists, so this is normal ordering.
+            Logger.info("Deferring renderer creation until the Voxy client session is ready");
             return;
         }
 
