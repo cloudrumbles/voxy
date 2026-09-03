@@ -72,7 +72,9 @@ public class Serialization {
                     .toJsonTree(value);
             var json = new JsonObject();
             json.addProperty(this.typeField, name);
-            valueJson.getAsJsonObject().asMap().forEach(json::add);
+            for (Map.Entry<String, JsonElement> entry : valueJson.getAsJsonObject().entrySet()) {
+                json.add(entry.getKey(), entry.getValue());
+            }
             return json;
         }
 
