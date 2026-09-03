@@ -51,7 +51,7 @@ jobs:
           set -o pipefail
           ./gradlew --no-daemon build jarJar 2>&1 | tee ci/build.log
 
-      - name: Verify packaged metadata
+      - name: Verify packaged metadata and runtime dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -80,6 +80,7 @@ jobs:
             echo 'stub renderer detected' >&2
             exit 1
           fi
+          python3 ci/validate-packaged-jar.py "$jar_file" | tee ci/packaged-jar-validation.txt
           sha256sum "$jar_file" > ci/voxy-jar.sha256
 
       - name: Capture concise diagnostics
@@ -137,3 +138,4 @@ jobs:
           path: |
             build/libs/*-all.jar
             ci/voxy-jar.sha256
+            ci/packaged-jar-validation.txt

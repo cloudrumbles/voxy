@@ -32,6 +32,14 @@ sourceSets {
     }
 }
 
+configurations {
+    lwjglLmdbNatives {
+        canBeConsumed = false
+        canBeResolved = true
+        transitive = false
+    }
+}
+
 version = project.mod_version
 group = project.maven_group
 base {
@@ -84,19 +92,24 @@ dependencies {
 
     compileOnly "io.github.llamalad7:mixinextras-common:${mixin_extras_version}"
     annotationProcessor "io.github.llamalad7:mixinextras-common:${mixin_extras_version}"
-    jarJar(implementation("io.github.llamalad7:mixinextras-forge:[${mixin_extras_version},0.6)")) {
-        version { strictly "[${mixin_extras_version},0.6)"; prefer mixin_extras_version }
+    implementation(jarJar("io.github.llamalad7:mixinextras-forge:${mixin_extras_version}")) {
+        transitive = false
+        jarJar.pin(it, mixin_extras_version)
+        jarJar.ranged(it, "[${mixin_extras_version}]")
     }
 
-    // Minecraft 1.19.2 supplies LWJGL core 3.3.1. LMDB is the only optional
-    // LWJGL binding retained here; Zstandard uses zstd-jni below so it carries
-    // the native runtime ordinary Minecraft installations do not provide.
+    // Minecraft 1.19.2 supplies LWJGL core 3.3.1. Keep the LMDB Java binding
+    // on exactly that ABI and place the Linux/Windows x64 natives in the outer
+    // mod JAR where LWJGL's classpath extractor can discover them.
     compileOnly 'org.lwjgl:lwjgl:3.3.1'
     compileOnly 'org.lwjgl:lwjgl-lmdb:3.3.1'
-    jarJar(implementation('org.lwjgl:lwjgl-lmdb:[3.3.1,4.0)')) {
-        exclude group: 'org.lwjgl', module: 'lwjgl'
-        version { strictly '[3.3.1,4.0)'; prefer '3.3.1' }
+    implementation(jarJar('org.lwjgl:lwjgl-lmdb:3.3.1')) {
+        transitive = false
+        jarJar.pin(it, '3.3.1')
+        jarJar.ranged(it, '[3.3.1]')
     }
+    lwjglLmdbNatives 'org.lwjgl:lwjgl-lmdb:3.3.1:natives-linux'
+    lwjglLmdbNatives 'org.lwjgl:lwjgl-lmdb:3.3.1:natives-windows'
 
     implementation(jarJar('com.github.luben:zstd-jni:1.5.7-16')) {
         transitive = false
@@ -104,23 +117,37 @@ dependencies {
         jarJar.ranged(it, '[1.5.7-16]')
     }
 
-    jarJar(implementation('org.rocksdb:rocksdbjni:[7.10.2,8.0)')) {
-        version { strictly '[7.10.2,8.0)'; prefer '7.10.2' }
+    // Pin storage/compression libraries to the selected functional baseline.
+    // Broad JarJar ranges silently selected newer, unvalidated versions.
+    implementation(jarJar('org.rocksdb:rocksdbjni:10.2.1')) {
+        transitive = false
+        jarJar.pin(it, '10.2.1')
+        jarJar.ranged(it, '[10.2.1]')
     }
-    jarJar(implementation('redis.clients:jedis:[5.1.0,6.0)')) {
-        version { strictly '[5.1.0,6.0)'; prefer '5.1.0' }
+    implementation(jarJar('redis.clients:jedis:5.1.0')) {
+        transitive = false
+        jarJar.pin(it, '5.1.0')
+        jarJar.ranged(it, '[5.1.0]')
     }
-    jarJar(implementation('org.apache.commons:commons-pool2:[2.12.0,3.0)')) {
-        version { strictly '[2.12.0,3.0)'; prefer '2.12.0' }
+    implementation(jarJar('org.apache.commons:commons-pool2:2.12.0')) {
+        transitive = false
+        jarJar.pin(it, '2.12.0')
+        jarJar.ranged(it, '[2.12.0]')
     }
-    jarJar(implementation('at.yawk.lz4:lz4-java:[1.8.1,2.0)')) {
-        version { strictly '[1.8.1,2.0)'; prefer '1.8.1' }
+    implementation(jarJar('at.yawk.lz4:lz4-java:1.8.1')) {
+        transitive = false
+        jarJar.pin(it, '1.8.1')
+        jarJar.ranged(it, '[1.8.1]')
     }
-    jarJar(implementation('org.tukaani:xz:[1.10,2.0)')) {
-        version { strictly '[1.10,2.0)'; prefer '1.10' }
+    implementation(jarJar('org.tukaani:xz:1.10')) {
+        transitive = false
+        jarJar.pin(it, '1.10')
+        jarJar.ranged(it, '[1.10]')
     }
-    jarJar(implementation('org.xerial:sqlite-jdbc:[3.42.0.0,4.0)')) {
-        version { strictly '[3.42.0.0,4.0)'; prefer '3.42.0.0' }
+    implementation(jarJar('org.xerial:sqlite-jdbc:3.49.1.0')) {
+        transitive = false
+        jarJar.pin(it, '3.49.1.0')
+        jarJar.ranged(it, '[3.49.1.0]')
     }
 
     compileOnly 'org.spongepowered:mixin:0.8.5'
@@ -177,6 +204,11 @@ tasks.named('jarJar').configure {
     enabled = true
     from("${buildDir}/tmp/compileJava/compileJava-refmap.json") {
         rename { 'client.voxy.refmap.json' }
+    }
+    from({ configurations.lwjglLmdbNatives.collect { zipTree(it) } }) {
+        include 'linux/x64/org/lwjgl/lmdb/liblwjgl_lmdb.so'
+        include 'windows/x64/org/lwjgl/lmdb/lwjgl_lmdb.dll'
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
     dependsOn(tasks.compileJava)
 }

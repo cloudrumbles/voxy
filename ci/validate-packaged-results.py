@@ -45,8 +45,17 @@ def require_positive(data: dict[str, Any], key: str, source: str) -> None:
 def validate_common(data: dict[str, Any], phase: str, source: str) -> None:
     if data.get("phase") != phase:
         fail(f"{source}: expected phase {phase!r}, got {data.get('phase')!r}")
-    for key in ("success", "voxyLoaded", "embeddiumLoaded", "backendInitialized", "backendReady"):
+    for key in (
+        "success",
+        "voxyLoaded",
+        "embeddiumLoaded",
+        "backendInitialized",
+        "backendReady",
+        "lmdbNativeReady",
+    ):
         require_true(data, key, source)
+    if data.get("lmdbNativeError") not in (None, ""):
+        fail(f"{source}: LMDB native probe reported an error: {data.get('lmdbNativeError')!r}")
 
 
 def validate_persistence_manifest(data: dict[str, Any], source: str, storage_leaf: str) -> None:

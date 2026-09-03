@@ -2,6 +2,7 @@ package me.cortex.voxy.client;
 
 import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
 import me.cortex.voxy.common.config.section.SectionSerializationStorage;
+import me.cortex.voxy.common.config.storage.lmdb.LMDBInterface;
 import me.cortex.voxy.commonImpl.VoxyCommon;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.TitleScreen;
@@ -13,6 +14,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -35,6 +37,8 @@ public final class VoxyClientSmoke {
     private static int ticks;
     private static int worldReadyTicks;
     private static long initialPersistenceBytes = -1L;
+    private static Boolean lmdbNativeReady;
+    private static String lmdbNativeError = "";
 
     private VoxyClientSmoke() {
     }
@@ -61,10 +65,17 @@ public final class VoxyClientSmoke {
         }
 
         Minecraft minecraft = Minecraft.getInstance();
+        Path gameDirectory = minecraft.gameDirectory.toPath();
         ticks++;
 
         if (initialPersistenceBytes < 0L) {
-            initialPersistenceBytes = persistenceBytes(minecraft.gameDirectory.toPath());
+            initialPersistenceBytes = persistenceBytes(gameDirectory);
+        }
+
+        probeLmdbNative(gameDirectory);
+        if (!Boolean.TRUE.equals(lmdbNativeReady)) {
+            fail("LMDB native runtime probe failed: " + lmdbNativeError);
+            return;
         }
 
         if ("title".equals(PHASE)) {
@@ -73,7 +84,7 @@ public final class VoxyClientSmoke {
                     && ModList.get().isLoaded("embeddium")
                     && VoxyClient.isRenderBackendInitialized()
                     && VoxyClient.isRenderBackendReady()) {
-                succeed("title screen reached with the packaged Voxy mod and render backend ready");
+                succeed("title screen reached with the packaged Voxy mod, render backend, and LMDB native ready");
                 return;
             }
         } else if (isWorldPhase()) {
@@ -85,7 +96,7 @@ public final class VoxyClientSmoke {
                 long successfulLoads = SectionSerializationStorage.getSuccessfulLoadCount();
                 long successfulSaves = SectionSerializationStorage.getSuccessfulSaveCount();
                 long successfulRenderPasses = SUCCESSFUL_RENDER_PASSES.get();
-                long currentPersistenceBytes = persistenceBytes(minecraft.gameDirectory.toPath());
+                long currentPersistenceBytes = persistenceBytes(gameDirectory);
 
                 boolean storageCondition;
                 if ("world-write".equals(PHASE)) {
@@ -114,6 +125,56 @@ public final class VoxyClientSmoke {
         int timeoutTicks = isWorldPhase() ? 3600 : 1200;
         if (ticks >= timeoutTicks) {
             fail("timed out before the phase contract was satisfied");
+        }
+    }
+
+    private static void probeLmdbNative(Path gameDirectory) {
+        if (lmdbNativeReady != null) {
+            return;
+        }
+
+        Path probeDirectory = null;
+        LMDBInterface database = null;
+        try {
+            probeDirectory = Files.createTempDirectory(gameDirectory, "voxy-lmdb-native-");
+            database = new LMDBInterface.Builder()
+                    .setMaxDbs(1)
+                    .open(probeDirectory.toString(), 0)
+                    .fetch();
+            lmdbNativeReady = true;
+        } catch (Throwable throwable) {
+            lmdbNativeReady = false;
+            lmdbNativeError = throwable.getClass().getName() + ": " + String.valueOf(throwable.getMessage());
+            throwable.printStackTrace();
+        } finally {
+            if (database != null) {
+                try {
+                    database.close();
+                } catch (Throwable throwable) {
+                    if (Boolean.TRUE.equals(lmdbNativeReady)) {
+                        lmdbNativeReady = false;
+                        lmdbNativeError = throwable.getClass().getName()
+                                + " while closing LMDB: " + String.valueOf(throwable.getMessage());
+                        throwable.printStackTrace();
+                    }
+                }
+            }
+            deleteRecursively(probeDirectory);
+        }
+    }
+
+    private static void deleteRecursively(Path root) {
+        if (root == null || !Files.exists(root)) {
+            return;
+        }
+        try (Stream<Path> paths = Files.walk(root)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                }
+            });
+        } catch (IOException ignored) {
         }
     }
 
@@ -158,6 +219,8 @@ public final class VoxyClientSmoke {
                 + "  \"embeddiumLoaded\": " + ModList.get().isLoaded("embeddium") + ",\n"
                 + "  \"backendInitialized\": " + VoxyClient.isRenderBackendInitialized() + ",\n"
                 + "  \"backendReady\": " + VoxyClient.isRenderBackendReady() + ",\n"
+                + "  \"lmdbNativeReady\": " + Boolean.TRUE.equals(lmdbNativeReady) + ",\n"
+                + "  \"lmdbNativeError\": \"" + escape(lmdbNativeError) + "\",\n"
                 + "  \"worldJoined\": " + (minecraft.level != null && minecraft.player != null) + ",\n"
                 + "  \"instanceCreated\": " + (VoxyCommon.getInstance() instanceof VoxyClientInstance) + ",\n"
                 + "  \"renderSystemCreated\": " + renderSystemCreated + ",\n"

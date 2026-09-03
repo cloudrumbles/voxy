@@ -10,6 +10,7 @@ on:
       - 'settings.gradle'
       - 'src/**'
       - 'ci/run-packaged-forge-smoke.sh'
+      - 'ci/validate-packaged-jar.py'
       - 'ci/validate-packaged-results.py'
       - '.github/workflows/forge-1.19.2-runtime-smoke.yml'
   pull_request:
@@ -59,8 +60,19 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          chmod +x gradlew ci/run-packaged-forge-smoke.sh ci/validate-packaged-results.py
+          chmod +x gradlew ci/run-packaged-forge-smoke.sh ci/validate-packaged-jar.py ci/validate-packaged-results.py
           ./gradlew --no-daemon clean test jarJar 2>&1 | tee ci/packaged-build.log
+
+      - name: Verify packaged runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t jar_files < <(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print | sort)
+          if [[ "${#jar_files[@]}" -ne 1 ]]; then
+            printf 'expected exactly one distributable JAR, found %s\n' "${#jar_files[@]}" >&2
+            exit 1
+          fi
+          python3 ci/validate-packaged-jar.py "${jar_files[0]}" | tee ci/packaged-jar-validation.txt
 
       - name: Validate the installed packaged client
         shell: bash
@@ -92,6 +104,7 @@ jobs:
           path: |
             build/libs/*-all.jar
             ci/packaged-build.log
+            ci/packaged-jar-validation.txt
             ci/packaged-runtime-smoke/
             run-packaged-client/logs/
             run-packaged-client/crash-reports/
