@@ -1,2 +1,0 @@
-validated_head=
-contract=forge-1.19.2-r4

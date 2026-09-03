@@ -7,7 +7,6 @@ import me.cortex.voxy.client.mixin.sodium.AccessorSodiumWorldRenderer;
 import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.StorageConfigUtil;
 import me.cortex.voxy.common.config.ConfigBuildCtx;
-import me.cortex.voxy.common.config.section.SectionSerializationStorage;
 import me.cortex.voxy.common.config.section.SectionStorage;
 import me.cortex.voxy.common.config.section.SectionStorageConfig;
 import me.cortex.voxy.commonImpl.ImportManager;
@@ -123,7 +122,7 @@ public class VoxyClientInstance extends VoxyInstance {
             serverStorageKey = ClientSessionEvents.getServerStorageKey();
         }
         if (serverStorageKey == null) {
-            Logger.error("Could not determine multiplayer server identity; using isolated fallback path");
+            Logger.error("Could not determine multiplayer server identity; using legacy UNKNOWN fallback path");
             serverStorageKey = "UNKNOWN";
         }
 
