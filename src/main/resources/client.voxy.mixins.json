@@ -1,5 +1,6 @@
 {
   "required": true,
+  "minVersion": "0.8.5",
   "package": "me.cortex.voxy.client.mixin",
   "plugin": "me.cortex.voxy.client.mixin.ClientVoxyMixinPlugin",
   "refmap": "client.voxy.refmap.json",
@@ -22,7 +23,8 @@
     "sodium.AccessorChunkTracker",
     "sodium.AccessorSodiumWorldRenderer",
     "sodium.MixinChunkJobQueue",
-    "sodium.MixinRenderSectionManager"
+    "sodium.MixinRenderSectionManager",
+    "sodium.MixinSodiumWorldRenderer"
   ],
   "injectors": {
     "defaultRequire": 1
