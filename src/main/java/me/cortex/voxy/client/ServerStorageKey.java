@@ -14,7 +14,7 @@ import java.util.Locale;
  */
 final class ServerStorageKey {
     private static final int MAX_KEY_LENGTH = 120;
-    private static final int READABLE_PREFIX_LENGTH = 96;
+    private static final int HASH_LENGTH = 16;
 
     private ServerStorageKey() {
     }
@@ -53,6 +53,7 @@ final class ServerStorageKey {
         }
 
         StringBuilder key = new StringBuilder(value.length());
+        boolean lossy = false;
         for (int index = 0; index < value.length(); index++) {
             char character = value.charAt(index);
             if (isAsciiLetterOrDigit(character)
@@ -62,17 +63,28 @@ final class ServerStorageKey {
                 key.append(character);
             } else {
                 key.append('_');
+                // Colons and IPv6 brackets are expected endpoint punctuation.
+                // Other replacements receive a digest so distinct unsafe or
+                // non-ASCII addresses cannot collapse onto the same directory.
+                if (character != ':' && character != '[' && character != ']') {
+                    lossy = true;
+                }
             }
+        }
+
+        while (!key.isEmpty() && key.charAt(key.length() - 1) == '.') {
+            key.setCharAt(key.length() - 1, '_');
+            lossy = true;
         }
 
         String result = key.toString();
         if (result.equals(".") || result.equals("..") || isWindowsReservedName(result)) {
             result = "_" + result;
         }
-        if (result.length() > MAX_KEY_LENGTH) {
-            result = result.substring(0, READABLE_PREFIX_LENGTH)
-                    + "-"
-                    + sha256(value).substring(0, 16);
+        if (lossy || result.length() > MAX_KEY_LENGTH) {
+            String suffix = "-" + sha256(value).substring(0, HASH_LENGTH);
+            int prefixLength = Math.min(result.length(), MAX_KEY_LENGTH - suffix.length());
+            result = result.substring(0, prefixLength) + suffix;
         }
         return result;
     }

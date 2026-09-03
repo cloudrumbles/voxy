@@ -34,9 +34,21 @@ final class ServerStorageKeyTest {
     }
 
     @Test
-    void windowsDeviceNamesAreNotUsedAsPathSegments() {
+    void lossyAddressesCannotCollapseOntoTheSameDirectory() {
+        String slash = ServerStorageKey.fromConfiguredAddress("server/a:25565");
+        String backslash = ServerStorageKey.fromConfiguredAddress("server\\a:25565");
+        String unicode = ServerStorageKey.fromConfiguredAddress("சேவையகம்:25565");
+
+        assertNotEquals(slash, backslash);
+        assertNotEquals(slash, unicode);
+        assertNotEquals(backslash, unicode);
+    }
+
+    @Test
+    void windowsDeviceNamesAndTrailingDotsAreSafe() {
         assertEquals("_CON", ServerStorageKey.fromConfiguredAddress("CON"));
         assertEquals("_lpt9.log", ServerStorageKey.fromConfiguredAddress("lpt9.log"));
+        assertFalse(ServerStorageKey.fromConfiguredAddress("example.org.").endsWith("."));
     }
 
     @Test

@@ -4,7 +4,6 @@ import me.cortex.voxy.client.compat.FlashbackCompat;
 import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.RenderResourceReuse;
 import me.cortex.voxy.client.mixin.sodium.AccessorSodiumWorldRenderer;
-import me.cortex.voxy.common.Logger;
 import me.cortex.voxy.common.StorageConfigUtil;
 import me.cortex.voxy.common.config.ConfigBuildCtx;
 import me.cortex.voxy.common.config.section.SectionStorage;
@@ -122,8 +121,8 @@ public class VoxyClientInstance extends VoxyInstance {
             serverStorageKey = ClientSessionEvents.getServerStorageKey();
         }
         if (serverStorageKey == null) {
-            Logger.error("Could not determine multiplayer server identity; using legacy UNKNOWN fallback path");
-            serverStorageKey = "UNKNOWN";
+            throw new IllegalStateException(
+                    "Cannot create Voxy persistence without a multiplayer server identity");
         }
 
         return multiplayerRoot.resolve(serverStorageKey).toAbsolutePath();
