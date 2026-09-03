@@ -25,6 +25,10 @@ jobs:
   packaged-client:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      # Ubuntu's llvmpipe advertises GLSL 4.50 by default even when its OpenGL
+      # context is overridden to 4.6. Voxy's real shaders declare GLSL 4.60.
+      MESA_GLSL_VERSION_OVERRIDE: '460'
 
     steps:
       - name: Check out sources
