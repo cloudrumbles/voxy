@@ -37,6 +37,10 @@ Backported to Forge 1.19.2 with parity tests for stable core behaviour.
     ordering = "AFTER"
     side = "CLIENT"
 
-# Forge 1.19.2 includes the Mixin bootstrap; declare Voxy's client mixins here.
+# Forge 1.19.2 includes the Mixin bootstrap. The common configuration supplies
+# world identity and shared hooks; the client configuration supplies rendering.
+[[mixins]]
+    config = "common.voxy.mixins.json"
+
 [[mixins]]
     config = "client.voxy.mixins.json"
