@@ -21,12 +21,7 @@ apply plugin: 'org.spongepowered.mixin'
 sourceSets {
     main {
         java {
-            // Oculus 1.19.2 uses the old net.coderbot Iris API. Keep shader
-            // integration out of this core backport until it has its own port.
-            exclude 'me/cortex/voxy/client/iris/**'
-            exclude 'me/cortex/voxy/client/mixin/iris/**'
             exclude 'me/cortex/voxy/client/mixin/nvidium/**'
-            exclude 'me/cortex/voxy/client/core/IrisVoxyRenderPipeline.java'
             exclude 'me/cortex/voxy/commonImpl/mixin/chunky/MixinFabricWorld.java'
         }
     }
@@ -75,6 +70,15 @@ minecraft {
 }
 
 repositories {
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = 'Modrinth'
+                url = 'https://api.modrinth.com/maven'
+            }
+        }
+        filter { includeGroup 'maven.modrinth' }
+    }
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net/' }
     maven { url = 'https://maven.blamejared.com/' }
@@ -86,6 +90,13 @@ dependencies {
     // The modernized 1.19.2 Embeddium line exposes the Sodium 0.5 renderer API
     // used by this backport.
     implementation fg.deobf("org.embeddedt:embeddium-1.19.2:${embeddium_version}")
+
+    // Oculus 1.6.9a is the final Forge shader loader for Minecraft 1.19.2.
+    // It remains optional at runtime, but compiling against the exact tested
+    // artifact guards the adapter against implementation-API drift.
+    compileOnly(fg.deobf("maven.modrinth:GchcoXML:Mw8aFpWF")) {
+        transitive = false
+    }
 
     // Minecraft 1.19.2 and the selected Embeddium build use JOML 1.10.5.
     compileOnly 'org.joml:joml:1.10.5'

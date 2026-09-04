@@ -1,12 +1,16 @@
 package me.cortex.voxy.client.mixin.iris;
 
-import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
-import net.irisshaders.iris.targets.RenderTargets;
+import com.google.common.collect.ImmutableSet;
+import net.coderbot.iris.pipeline.newshader.NewWorldRenderingPipeline;
+import net.coderbot.iris.rendertarget.RenderTargets;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
-@Mixin(value = IrisRenderingPipeline.class, remap = false)
+@Mixin(value = NewWorldRenderingPipeline.class, remap = false)
 public interface IrisRenderingPipelineAccessor {
-    @Accessor
-    RenderTargets getRenderTargets();
+    @Accessor("renderTargets")
+    RenderTargets voxy$getRenderTargets();
+
+    @Accessor("flippedAfterPrepare")
+    ImmutableSet<Integer> voxy$getFlippedAfterPrepare();
 }

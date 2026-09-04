@@ -3,7 +3,7 @@ package me.cortex.voxy.client.mixin.iris;
 import com.google.common.collect.ImmutableList;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import net.irisshaders.iris.shaderpack.include.ShaderPackSourceNames;
+import net.coderbot.iris.shaderpack.include.ShaderPackSourceNames;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 

@@ -4,14 +4,11 @@ import me.cortex.voxy.client.config.VoxyConfig;
 import me.cortex.voxy.client.core.util.IrisUtil;
 import me.cortex.voxy.client.iris.IGetVoxyPatchData;
 import me.cortex.voxy.client.iris.IrisShaderPatch;
-import net.irisshaders.iris.shaderpack.ShaderPack;
-import net.irisshaders.iris.shaderpack.include.AbsolutePackPath;
-import net.irisshaders.iris.shaderpack.programs.ProgramSet;
-import net.irisshaders.iris.shaderpack.properties.PackDirectives;
-import net.irisshaders.iris.shaderpack.properties.ShaderProperties;
-import org.spongepowered.asm.mixin.Final;
+import net.coderbot.iris.shaderpack.ProgramSet;
+import net.coderbot.iris.shaderpack.ShaderPack;
+import net.coderbot.iris.shaderpack.ShaderProperties;
+import net.coderbot.iris.shaderpack.include.AbsolutePackPath;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -21,31 +18,22 @@ import java.util.function.Function;
 
 @Mixin(value = ProgramSet.class, remap = false)
 public class MixinProgramSet implements IGetVoxyPatchData {
-    @Shadow @Final private PackDirectives packDirectives;
-    @Unique IrisShaderPatch patchData;
+    @Unique private IrisShaderPatch voxy$patchData;
 
-    @Inject(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/irisshaders/iris/shaderpack/programs/ProgramSet;locateDirectives()V", shift = At.Shift.BEFORE))
-    private void voxy$injectPatchMaker(AbsolutePackPath directory, Function<AbsolutePackPath, String> sourceProvider, ShaderProperties shaderProperties, ShaderPack pack, CallbackInfo ci) {
+    @Inject(method = "<init>", at = @At("RETURN"))
+    private void voxy$parsePatch(
+            AbsolutePackPath directory,
+            Function<AbsolutePackPath, String> sourceProvider,
+            ShaderProperties shaderProperties,
+            ShaderPack pack,
+            CallbackInfo callbackInfo) {
         if (VoxyConfig.CONFIG.isRenderingEnabled() && IrisUtil.SHADER_SUPPORT) {
-            this.patchData = IrisShaderPatch.makePatch(pack, directory, sourceProvider);
+            this.voxy$patchData = IrisShaderPatch.makePatch(pack, directory, sourceProvider);
         }
-        /*
-        if (this.patchData != null) {
-            //Inject directives from voxy
-            DispatchingDirectiveHolder ddh = new DispatchingDirectiveHolder();
-            this.packDirectives.acceptDirectivesFrom(ddh);
-            CommentDirectiveParser.findDirective(this.patchData.getPatchSource(), CommentDirective.Type.RENDERTARGETS)
-                    .map(dir->Arrays.stream(dir.getDirective().split(","))
-                            .mapToInt(Integer::parseInt).toArray())
-                    .ifPresent(ddh::processDirective);
-
-        }
-         */
     }
-
 
     @Override
     public IrisShaderPatch voxy$getPatchData() {
-        return this.patchData;
+        return this.voxy$patchData;
     }
 }

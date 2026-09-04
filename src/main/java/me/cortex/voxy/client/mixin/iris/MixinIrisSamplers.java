@@ -2,11 +2,10 @@ package me.cortex.voxy.client.mixin.iris;
 
 import com.google.common.collect.ImmutableSet;
 import me.cortex.voxy.client.iris.VoxySamplers;
-import net.irisshaders.iris.gl.sampler.SamplerHolder;
-import net.irisshaders.iris.pipeline.IrisRenderingPipeline;
-import net.irisshaders.iris.pipeline.WorldRenderingPipeline;
-import net.irisshaders.iris.samplers.IrisSamplers;
-import net.irisshaders.iris.targets.RenderTargets;
+import net.coderbot.iris.gbuffer_overrides.matching.InputAvailability;
+import net.coderbot.iris.gl.image.ImageHolder;
+import net.coderbot.iris.gl.sampler.SamplerHolder;
+import net.coderbot.iris.pipeline.newshader.NewWorldRenderingPipeline;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -14,12 +13,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.function.Supplier;
 
-@Mixin(value = IrisSamplers.class, remap = false)
+@Mixin(value = NewWorldRenderingPipeline.class, remap = false)
 public class MixinIrisSamplers {
-    @Inject(method = "addRenderTargetSamplers", at = @At("TAIL"))
-    private static void voxy$injectSamplers(SamplerHolder samplers, Supplier<ImmutableSet<Integer>> flipped, RenderTargets renderTargets, boolean isFullscreenPass, WorldRenderingPipeline pipeline, CallbackInfo ci) {
-        if (pipeline instanceof IrisRenderingPipeline ipipe) {
-            VoxySamplers.addSamplers(ipipe, samplers);
-        }
+    @Inject(method = "addGbufferOrShadowSamplers", at = @At("TAIL"))
+    private void voxy$addDepthSamplers(
+            SamplerHolder samplers,
+            ImageHolder images,
+            Supplier<ImmutableSet<Integer>> flipped,
+            boolean shadowPass,
+            InputAvailability availability,
+            CallbackInfo callbackInfo) {
+        VoxySamplers.addSamplers((NewWorldRenderingPipeline) (Object) this, samplers);
     }
 }

@@ -24,7 +24,19 @@
     "sodium.AccessorSodiumWorldRenderer",
     "sodium.MixinChunkJobQueue",
     "sodium.MixinFlawlessFrames",
-    "sodium.MixinRenderSectionManager"
+    "sodium.MixinRenderSectionManager",
+    "iris.CustomUniformsAccessor",
+    "iris.IrisRenderingPipelineAccessor",
+    "iris.MixinIris",
+    "iris.MixinIrisRenderingPipeline",
+    "iris.MixinIrisSamplers",
+    "iris.MixinLevelRenderer",
+    "iris.MixinMatrixUniforms",
+    "iris.MixinPackRenderTargetDirectives",
+    "iris.MixinProgramSet",
+    "iris.MixinShaderPackSourceNames",
+    "iris.MixinStandardMacros",
+    "iris.ShaderStorageBufferHolderAccessor"
   ],
   "injectors": {
     "defaultRequire": 1
