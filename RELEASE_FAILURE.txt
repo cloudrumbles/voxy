@@ -1,0 +1,11 @@
+## core
+log download failed: HTTP Error 401: Server failed to authenticate the request. Please refer to the information in the www-authenticate header.
+
+## shader-complementary_reimagined
+log download failed: HTTP Error 401: Server failed to authenticate the request. Please refer to the information in the www-authenticate header.
+
+## baseline-client
+log download failed: HTTP Error 401: Server failed to authenticate the request. Please refer to the information in the www-authenticate header.
+
+## shader-photon
+log download failed: HTTP Error 401: Server failed to authenticate the request. Please refer to the information in the www-authenticate header.

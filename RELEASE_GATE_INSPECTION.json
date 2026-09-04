@@ -1,0 +1,51 @@
+{
+  "validated_sha": "0cfad06c8056071e64a4ce367002255a90e4cc61",
+  "run_id": 33891194846,
+  "run_url": "https://github.com/cloudrumbles/voxy/actions/runs/33891194846",
+  "conclusion": "failure",
+  "jobs": [
+    {
+      "id": 101082999966,
+      "name": "core",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Unit, parity, build, reobfuscation, and package contract"
+      ]
+    },
+    {
+      "id": 101083000207,
+      "name": "shader-complementary_reimagined",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Build and execute the installed shader client"
+      ]
+    },
+    {
+      "id": 101083000319,
+      "name": "baseline-client",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Build and execute the ordinary installed client"
+      ]
+    },
+    {
+      "id": 101083000384,
+      "name": "shader-photon",
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_steps": [
+        "Build and execute the installed shader client"
+      ]
+    },
+    {
+      "id": 101083592188,
+      "name": "certify",
+      "status": "completed",
+      "conclusion": "skipped",
+      "failed_steps": []
+    }
+  ]
+}
