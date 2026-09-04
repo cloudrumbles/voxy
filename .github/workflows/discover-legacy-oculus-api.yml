@@ -1,0 +1,81 @@
+name: Discover legacy Oculus API baseline
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Locate the newest Voxy revision using the legacy Iris namespace
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/MCRcortex/voxy.git || true
+          git fetch --force --tags upstream '+refs/heads/*:refs/remotes/upstream/*'
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          paths = [
+              'src/main/java/me/cortex/voxy/client/core/IrisVoxyRenderPipeline.java',
+              'src/main/java/me/cortex/voxy/client/core/util/IrisUtil.java',
+              'src/main/java/me/cortex/voxy/client/iris/IrisShaderPatch.java',
+              'src/main/java/me/cortex/voxy/client/iris/IrisVoxyRenderPipelineData.java',
+              'src/main/java/me/cortex/voxy/client/iris/VoxySamplers.java',
+              'src/main/java/me/cortex/voxy/client/iris/VoxyUniforms.java',
+              'src/main/java/me/cortex/voxy/client/mixin/iris/MixinIrisRenderingPipeline.java',
+              'src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java',
+              'src/main/java/me/cortex/voxy/client/mixin/iris/MixinPackRenderTargetDirectives.java',
+          ]
+
+          revisions = subprocess.check_output(
+              ['git', 'rev-list', '--all', '--', *paths], text=True
+          ).splitlines()
+          selected = None
+          matching_paths = []
+          for revision in revisions:
+              found = []
+              legacy = False
+              for path in paths:
+                  probe = subprocess.run(
+                      ['git', 'show', f'{revision}:{path}'],
+                      text=True,
+                      capture_output=True,
+                  )
+                  if probe.returncode == 0:
+                      found.append(path)
+                      if 'net.coderbot.iris' in probe.stdout:
+                          legacy = True
+              if legacy:
+                  selected = revision
+                  matching_paths = found
+                  break
+
+          report = {
+              'selected_revision': selected,
+              'paths': matching_paths,
+              'searched_revisions': len(revisions),
+          }
+          Path('LEGACY_OCULUS_BASELINE.json').write_text(
+              json.dumps(report, indent=2) + '\n', encoding='utf-8'
+          )
+          if selected is None:
+              raise SystemExit('No historical net.coderbot.iris Voxy integration was found')
+          PY
+      - name: Commit the reproducible discovery result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add LEGACY_OCULUS_BASELINE.json
+          git commit -m 'ci: record legacy Oculus source baseline' || exit 0
+          git push origin HEAD:forge-1.19.2
