@@ -1,0 +1,41 @@
+name: Prepare shader runtime validation (one-shot)
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - 'ci/prepare-shader-runtime-validation.py'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Add validation hooks
+        run: python3 ci/prepare-shader-runtime-validation.py
+      - name: Compile and test the instrumented port
+        run: ./gradlew --no-daemon clean test build jarJar
+      - name: Commit validated instrumentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add src/main/java/me/cortex/voxy/client/VoxyClientSmoke.java \
+            src/main/java/me/cortex/voxy/client/core/IrisVoxyRenderPipeline.java \
+            src/main/java/me/cortex/voxy/client/iris/IrisShaderPatch.java \
+            ci/run-packaged-forge-smoke.sh
+          touch SHADER_RUNTIME_INSTRUMENTATION_GREEN
+          git add SHADER_RUNTIME_INSTRUMENTATION_GREEN
+          git commit -m 'test: verify live Oculus Voxy shader pipelines'
+          git push origin HEAD:forge-1.19.2
