@@ -1,0 +1,42 @@
+name: Ensure Oculus pipeline selection (one-shot)
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - 'ci/ensure-oculus-pipeline-selection.py'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v6
+      - run: python3 ci/ensure-oculus-pipeline-selection.py
+      - name: Require shader-aware selection and compile it
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'new IrisVoxyRenderPipeline' \
+            src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java
+          ./gradlew --no-daemon clean test build jarJar
+      - name: Commit the selection path
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add src/main/java/me/cortex/voxy/client/core/VoxyRenderSystem.java
+          touch OCULUS_PIPELINE_SELECTION_GREEN
+          git add OCULUS_PIPELINE_SELECTION_GREEN
+          git commit -m 'fix: activate the Oculus-aware Voxy render pipeline'
+          git push origin HEAD:forge-1.19.2
