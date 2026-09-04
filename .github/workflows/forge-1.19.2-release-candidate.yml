@@ -1,0 +1,307 @@
+name: Forge 1.19.2 complete release candidate
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - '.github/workflows/forge-1.19.2-release-candidate.yml'
+      - 'FINAL_RELEASE_GATE_TRIGGER'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forge-1.19.2-complete-release-candidate
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Unit, parity, build, reobfuscation, and package contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew ci/validate-packaged-jar.py
+          ./gradlew --no-daemon clean test build jarJar
+          mapfile -t jars < <(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print | sort)
+          test "${#jars[@]}" -eq 1
+          python3 ci/validate-packaged-jar.py "${jars[0]}"
+          sha256sum "${jars[0]}" > build/libs/SHA256SUMS
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-jar-${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            build/libs/*-all.jar
+            build/libs/SHA256SUMS
+
+  baseline-client:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      MESA_GLSL_VERSION_OVERRIDE: '460'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install software OpenGL
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0 flite1-dev
+      - name: Build and execute the ordinary installed client
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew ci/run-packaged-forge-smoke.sh \
+            ci/validate-packaged-jar.py ci/validate-packaged-results.py
+          bash -n ci/run-packaged-forge-smoke.sh
+          ./gradlew --no-daemon clean test jarJar
+          mapfile -t jars < <(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print | sort)
+          test "${#jars[@]}" -eq 1
+          python3 ci/validate-packaged-jar.py "${jars[0]}"
+          export JAVA_TOOL_OPTIONS="-Dmixin.env.remapRefMap=true \
+            -Dmixin.env.refMapRemappingFile=${GITHUB_WORKSPACE}/build/packaged-smoke-client-project/build/createSrgToMcp/output.srg \
+            -Dembeddium.enableGameTest=false \
+            -Dembeddium.runAutomatedTests=false"
+          bash ci/run-packaged-forge-smoke.sh
+          test -s ci/packaged-runtime-smoke/SUCCESS
+          python3 ci/validate-packaged-results.py ci/packaged-runtime-smoke
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: baseline-evidence-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            ci/packaged-runtime-smoke/
+            run-packaged-client/logs/
+            run-packaged-client/crash-reports/
+            run-packaged-client/voxy-smoke-*.json
+            run-packaged-client/.voxy/
+            run-packaged-server/logs/
+
+  shader-clients:
+    name: shader-${{ matrix.pack }}
+    strategy:
+      fail-fast: false
+      matrix:
+        pack:
+          - photon
+          - complementary_reimagined
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      MESA_GLSL_VERSION_OVERRIDE: '460'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Install software OpenGL
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0 flite1-dev
+      - name: Download and verify pinned fixtures
+        shell: bash
+        env:
+          MATRIX_PACK: ${{ matrix.pack }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci/shader-fixtures
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          root = Path.cwd()
+          destination = root / 'ci' / 'shader-fixtures'
+          headers = {'User-Agent': 'cloudrumbles/voxy-forge-port-validation'}
+
+          def download(url, path):
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  data = response.read()
+              path.write_bytes(data)
+              return data
+
+          oculus = json.loads((root / 'OCULUS_1_19_2.json').read_text())
+          candidates = sorted(oculus['files'], key=lambda item: not item.get('primary', False))
+          selected_oculus = next(item for item in candidates if item['filename'].lower().endswith('.jar'))
+          oculus_path = destination / 'oculus.jar'
+          oculus_data = download(selected_oculus['url'], oculus_path)
+          expected = selected_oculus.get('hashes', {}).get('sha512')
+          if expected and hashlib.sha512(oculus_data).hexdigest() != expected:
+              raise SystemExit('Oculus SHA-512 mismatch')
+
+          matrix = json.loads((root / 'SHADERPACK_MATRIX.json').read_text())
+          pack = matrix['packs'][os.environ['MATRIX_PACK']]
+          shader_path = destination / pack['filename']
+          shader_data = download(pack['download_url'], shader_path)
+          if hashlib.sha512(shader_data).hexdigest() != pack['sha512']:
+              raise SystemExit('shader-pack SHA-512 mismatch')
+
+          with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as output:
+              output.write(f'VOXY_OCULUS_JAR={oculus_path.resolve()}\n')
+              output.write(f'VOXY_SHADERPACK_FILE={shader_path.resolve()}\n')
+              output.write(f"VOXY_SHADERPACK_NAME={pack['filename']}\n")
+          PY
+      - name: Build and execute the installed shader client
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew ci/run-packaged-forge-smoke.sh \
+            ci/validate-packaged-jar.py ci/validate-packaged-results.py \
+            ci/validate-shader-results.py
+          bash -n ci/run-packaged-forge-smoke.sh
+          ./gradlew --no-daemon clean test jarJar
+          mapfile -t jars < <(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print | sort)
+          test "${#jars[@]}" -eq 1
+          python3 ci/validate-packaged-jar.py "${jars[0]}"
+          export JAVA_TOOL_OPTIONS="-Dmixin.env.remapRefMap=true \
+            -Dmixin.env.refMapRemappingFile=${GITHUB_WORKSPACE}/build/packaged-smoke-client-project/build/createSrgToMcp/output.srg \
+            -Dembeddium.enableGameTest=false \
+            -Dembeddium.runAutomatedTests=false \
+            -Dvoxy.smoke.requireShaders=true \
+            -Dvoxy.smoke.expectedShaderPack=${VOXY_SHADERPACK_NAME}"
+          bash ci/run-packaged-forge-smoke.sh
+          test -s ci/packaged-runtime-smoke/SUCCESS
+          python3 ci/validate-packaged-results.py ci/packaged-runtime-smoke
+          python3 ci/validate-shader-results.py ci/packaged-runtime-smoke "$VOXY_SHADERPACK_NAME"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: shader-${{ matrix.pack }}-evidence-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            ci/packaged-runtime-smoke/
+            run-packaged-client/logs/
+            run-packaged-client/crash-reports/
+            run-packaged-client/voxy-smoke-*.json
+            run-packaged-client/.voxy/
+            run-packaged-client/config/oculus.properties
+            run-packaged-client/config/iris.properties
+            run-packaged-server/logs/
+
+  certify:
+    needs:
+      - core
+      - baseline-client
+      - shader-clients
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-jar-${{ github.sha }}
+          path: release
+      - name: Record the exact certified release
+        shell: bash
+        env:
+          VALIDATED_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          remote_sha="$(git ls-remote origin refs/heads/forge-1.19.2 | awk '{print $1}')"
+          if [[ "$remote_sha" != "$VALIDATED_SHA" ]]; then
+            echo "branch moved from $VALIDATED_SHA to $remote_sha; refusing stale certification" >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          jars = sorted(Path('release').glob('*-all.jar'))
+          if len(jars) != 1:
+              raise SystemExit(f'expected one release JAR, found {len(jars)}')
+          jar = jars[0]
+          oculus = json.loads(Path('OCULUS_1_19_2.json').read_text())
+          shaderpacks = json.loads(Path('SHADERPACK_MATRIX.json').read_text())
+          result = {
+              'schema': 1,
+              'validated_commit': os.environ['VALIDATED_SHA'],
+              'workflow_run_id': int(os.environ['RUN_ID']),
+              'workflow_url': (
+                  f"https://github.com/{os.environ['REPOSITORY']}/actions/runs/{os.environ['RUN_ID']}"
+              ),
+              'minecraft': '1.19.2',
+              'forge': '43.5.2',
+              'java': 17,
+              'embeddium': '0.3.32-beta.90+mc1.19.2',
+              'oculus': {
+                  'version_id': oculus['id'],
+                  'version_number': oculus['version_number'],
+              },
+              'shaderpacks': {
+                  key: {
+                      'version_id': pack['version_id'],
+                      'version_number': pack['version_number'],
+                      'filename': pack['filename'],
+                  }
+                  for key, pack in shaderpacks['packs'].items()
+              },
+              'artifact': {
+                  'filename': jar.name,
+                  'sha256': hashlib.sha256(jar.read_bytes()).hexdigest(),
+                  'size': jar.stat().st_size,
+              },
+              'contracts': [
+                  'unit-and-parity',
+                  'forge-build-and-reobfuscation',
+                  'exact-runtime-dependencies',
+                  'baseline-title-world-render-persist-restart-reopen',
+                  'photon-title-world-render-persist-restart-reopen',
+                  'complementary-reimagined-title-world-render-persist-restart-reopen',
+              ],
+          }
+          Path('RELEASE_READY.json').write_text(json.dumps(result, indent=2) + '\n')
+          PY
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add RELEASE_READY.json
+          git commit -m 'release: certify Forge 1.19.2 Oculus shader support'
+          git push origin HEAD:forge-1.19.2
+      - uses: actions/upload-artifact@v7
+        with:
+          name: voxy-forge-1.19.2-oculus-ready-${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            release/*-all.jar
+            release/SHA256SUMS
+            RELEASE_READY.json
