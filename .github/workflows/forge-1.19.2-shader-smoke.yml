@@ -1,0 +1,171 @@
+name: Forge 1.19.2 Oculus shader validation
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - 'build.gradle'
+      - 'gradle.properties'
+      - 'oculus-version.gradle'
+      - 'OCULUS_1_19_2.json'
+      - 'SHADERPACK_MATRIX.json'
+      - 'src/**'
+      - 'ci/run-packaged-forge-smoke.sh'
+      - 'ci/validate-packaged-jar.py'
+      - 'ci/validate-packaged-results.py'
+      - 'ci/validate-shader-results.py'
+      - '.github/workflows/forge-1.19.2-shader-smoke.yml'
+  pull_request:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forge-1.19.2-shaders-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shader-client:
+    name: ${{ matrix.pack }}
+    strategy:
+      fail-fast: false
+      matrix:
+        pack:
+          - photon
+          - complementary_reimagined
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      MESA_GLSL_VERSION_OVERRIDE: '460'
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install software OpenGL and client native runtime
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0 flite1-dev
+
+      - name: Download pinned Oculus and shader-pack fixtures
+        shell: bash
+        env:
+          MATRIX_PACK: ${{ matrix.pack }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci/shader-fixtures
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          import urllib.request
+          from pathlib import Path
+
+          root = Path.cwd()
+          destination = root / 'ci' / 'shader-fixtures'
+          headers = {'User-Agent': 'cloudrumbles/voxy-forge-port-validation'}
+
+          def download(url: str, path: Path) -> bytes:
+              request = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(request) as response:
+                  payload = response.read()
+              path.write_bytes(payload)
+              return payload
+
+          oculus = json.loads((root / 'OCULUS_1_19_2.json').read_text())
+          files = sorted(oculus['files'], key=lambda item: not item.get('primary', False))
+          jars = [item for item in files if item['filename'].lower().endswith('.jar')]
+          if not jars:
+              raise SystemExit('pinned Oculus release contains no JAR')
+          oculus_file = jars[0]
+          oculus_path = destination / 'oculus.jar'
+          oculus_payload = download(oculus_file['url'], oculus_path)
+          expected_oculus_sha512 = oculus_file.get('hashes', {}).get('sha512')
+          if expected_oculus_sha512 and hashlib.sha512(oculus_payload).hexdigest() != expected_oculus_sha512:
+              raise SystemExit('Oculus fixture SHA-512 mismatch')
+
+          matrix = json.loads((root / 'SHADERPACK_MATRIX.json').read_text())
+          pack = matrix['packs'][os.environ['MATRIX_PACK']]
+          shader_path = destination / pack['filename']
+          shader_payload = download(pack['download_url'], shader_path)
+          if hashlib.sha512(shader_payload).hexdigest() != pack['sha512']:
+              raise SystemExit('shader-pack fixture SHA-512 mismatch')
+
+          env_path = Path(os.environ['GITHUB_ENV'])
+          with env_path.open('a', encoding='utf-8') as environment:
+              environment.write(f"VOXY_OCULUS_JAR={oculus_path.resolve()}\n")
+              environment.write(f"VOXY_SHADERPACK_FILE={shader_path.resolve()}\n")
+              environment.write(f"VOXY_SHADERPACK_NAME={pack['filename']}\n")
+              environment.write(f"VOXY_SHADERPACK_VERSION={pack['version_number']}\n")
+          PY
+
+      - name: Build, test, and verify the distributable
+        shell: bash
+        run: |
+          set -o pipefail
+          chmod +x gradlew ci/run-packaged-forge-smoke.sh \
+            ci/validate-packaged-jar.py ci/validate-packaged-results.py ci/validate-shader-results.py
+          bash -n ci/run-packaged-forge-smoke.sh
+          ./gradlew --no-daemon clean test jarJar 2>&1 | tee ci/shader-build.log
+          mapfile -t jars < <(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print | sort)
+          test "${#jars[@]}" -eq 1
+          python3 ci/validate-packaged-jar.py "${jars[0]}"
+
+      - name: Run installed-artifact validation with the shader pack enabled
+        shell: bash
+        run: |
+          set -euo pipefail
+          export JAVA_TOOL_OPTIONS="-Dmixin.env.remapRefMap=true \
+            -Dmixin.env.refMapRemappingFile=${GITHUB_WORKSPACE}/build/packaged-smoke-client-project/build/createSrgToMcp/output.srg \
+            -Dembeddium.enableGameTest=false \
+            -Dembeddium.runAutomatedTests=false \
+            -Dvoxy.smoke.requireShaders=true \
+            -Dvoxy.smoke.expectedShaderPack=${VOXY_SHADERPACK_NAME}"
+          bash ci/run-packaged-forge-smoke.sh
+
+      - name: Require the complete shader contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s ci/packaged-runtime-smoke/SUCCESS
+          python3 ci/validate-packaged-results.py ci/packaged-runtime-smoke
+          python3 ci/validate-shader-results.py \
+            ci/packaged-runtime-smoke "$VOXY_SHADERPACK_NAME"
+
+      - name: Upload shader validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: voxy-forge-1.19.2-${{ matrix.pack }}-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            build/libs/*-all.jar
+            ci/shader-build.log
+            ci/packaged-runtime-smoke/
+            run-packaged-client/logs/
+            run-packaged-client/crash-reports/
+            run-packaged-client/voxy-smoke-*.json
+            run-packaged-client/.voxy/
+            run-packaged-client/config/oculus.properties
+            run-packaged-client/config/iris.properties
+            run-packaged-server/logs/
+            run-packaged-server/crash-reports/
