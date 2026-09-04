@@ -20,7 +20,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tar --exclude=.git --exclude=build --exclude=run -czf voxy-shader-port-source.tar.gz .
+          tar --exclude=.git --exclude=build --exclude=run -czf /tmp/voxy-shader-port-source.tar.gz .
+          mv /tmp/voxy-shader-port-source.tar.gz .
       - uses: actions/upload-artifact@v7
         with:
           name: voxy-shader-port-source-${{ github.sha }}
