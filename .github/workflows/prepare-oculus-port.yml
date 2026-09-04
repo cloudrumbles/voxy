@@ -1,0 +1,39 @@
+name: Prepare Oculus port (one-shot)
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - 'ci/prepare-oculus-port.py'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Apply compatibility transformations
+        run: python3 ci/prepare-oculus-port.py
+      - name: Compile and test
+        shell: bash
+        run: ./gradlew --no-daemon clean test build jarJar
+      - name: Commit the adapted integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add src/main/java src/main/resources/client.voxy.mixins.json OCULUS_PORT_PREPARATION.json
+          touch OCULUS_CORE_BUILD_GREEN
+          git add OCULUS_CORE_BUILD_GREEN
+          git commit -m 'port: enable optional Oculus shader integration'
+          git push origin HEAD:forge-1.19.2
