@@ -1,35 +1,23 @@
 package me.cortex.voxy.common.config.compressors;
 
+import com.github.luben.zstd.Zstd;
 import me.cortex.voxy.common.config.ConfigBuildCtx;
 import me.cortex.voxy.common.config.section.SectionSerializationStorage;
 import me.cortex.voxy.common.util.MemoryBuffer;
 import me.cortex.voxy.common.util.ResizingThreadLocalMemoryBuffer;
 
-import static me.cortex.voxy.common.util.GlobalCleaner.CLEANER;
-import static org.lwjgl.util.zstd.Zstd.*;
-
+/**
+ * Zstandard compression backed by zstd-jni.
+ *
+ * <p>Minecraft 1.19.2 ships LWJGL core 3.3.1, but not the optional
+ * lwjgl-zstd native module. Keeping the compressor on LWJGL therefore made an
+ * otherwise self-contained Forge mod dependent on a native that ordinary
+ * clients do not have. zstd-jni carries its own platform natives while writing
+ * the same standard Zstandard frames, so existing Voxy data remains compatible.</p>
+ */
 public class ZSTDCompressor implements StorageCompressor {
-    private record Ref(long ptr) {}
-
-    private static Ref createCleanableCompressionContext() {
-        long ctx = ZSTD_createCCtx();
-        var ref = new Ref(ctx);
-        CLEANER.register(ref, ()->ZSTD_freeCCtx(ctx));
-        return ref;
-    }
-
-    private static Ref createCleanableDecompressionContext() {
-        long ctx = ZSTD_createDCtx();
-        nZSTD_DCtx_setParameter(ctx, ZSTD_d_experimentalParam3, 1);//experimental ZSTD_d_forceIgnoreChecksum
-        var ref = new Ref(ctx);
-        CLEANER.register(ref, ()->ZSTD_freeDCtx(ctx));
-        return ref;
-    }
-
-    private static final ThreadLocal<Ref> COMPRESSION_CTX = ThreadLocal.withInitial(ZSTDCompressor::createCleanableCompressionContext);
-    private static final ThreadLocal<Ref> DECOMPRESSION_CTX = ThreadLocal.withInitial(ZSTDCompressor::createCleanableDecompressionContext);
-
-    private static final ResizingThreadLocalMemoryBuffer SCRATCH = new ResizingThreadLocalMemoryBuffer(SectionSerializationStorage.BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
+    private static final ResizingThreadLocalMemoryBuffer SCRATCH =
+            new ResizingThreadLocalMemoryBuffer(SectionSerializationStorage.BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
 
     private final int level;
 
@@ -39,22 +27,47 @@ public class ZSTDCompressor implements StorageCompressor {
 
     @Override
     public MemoryBuffer compress(MemoryBuffer saveData) {
-        var compressedData = SCRATCH.get(ZSTD_COMPRESSBOUND(saveData.size)).createUntrackedUnfreeableReference();
-        long compressedSize = nZSTD_compressCCtx(COMPRESSION_CTX.get().ptr, compressedData.address, compressedData.size, saveData.address, saveData.size, this.level);
+        long bound = Zstd.compressBound(saveData.size);
+        var compressedData = SCRATCH.get(bound).createUntrackedUnfreeableReference();
+        long compressedSize = requireSuccess(
+                Zstd.compressUnsafe(
+                        compressedData.address,
+                        compressedData.size,
+                        saveData.address,
+                        saveData.size,
+                        this.level),
+                "compression");
         return compressedData.subSize(compressedSize);
     }
 
     @Override
     public MemoryBuffer decompress(MemoryBuffer saveData) {
         var decompressed = SCRATCH.get().createUntrackedUnfreeableReference();
-        long size = nZSTD_decompressDCtx(DECOMPRESSION_CTX.get().ptr, decompressed.address, decompressed.size, saveData.address, saveData.size);
-        //TODO:FIXME: DONT ASSUME IT DOESNT FAIL
-        return decompressed.subSize(size);
+        long decompressedSize = requireSuccess(
+                Zstd.decompressUnsafe(
+                        decompressed.address,
+                        decompressed.size,
+                        saveData.address,
+                        saveData.size),
+                "decompression");
+        return decompressed.subSize(decompressedSize);
+    }
+
+    private static long requireSuccess(long result, String operation) {
+        if (Zstd.isError(result)) {
+            throw new IllegalStateException("Zstandard " + operation + " failed: "
+                    + Zstd.getErrorName(result));
+        }
+        if (result <= 0L) {
+            throw new IllegalStateException("Zstandard " + operation
+                    + " produced an invalid byte count: " + result);
+        }
+        return result;
     }
 
     @Override
     public void close() {
-
+        // zstd-jni's one-shot API owns no Java-side context for us to release.
     }
 
     public static class Config extends CompressorConfig {

@@ -1,0 +1,139 @@
+name: Resolve Voxy shader-pack fixtures (one-shot)
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - '.github/workflows/resolve-voxy-shaderpacks.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Resolve official releases containing Voxy patch data
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import io
+          import json
+          import urllib.parse
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          USER_AGENT = 'cloudrumbles/voxy-forge-port-validation'
+
+          def get_json(url):
+              req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+              with urllib.request.urlopen(req) as response:
+                  return json.load(response)
+
+          def get_bytes(url):
+              req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
+              with urllib.request.urlopen(req) as response:
+                  return response.read()
+
+          def find_project(queries, expected_title):
+              for slug in queries:
+                  try:
+                      project = get_json(f'https://api.modrinth.com/v2/project/{slug}')
+                  except Exception:
+                      continue
+                  if project.get('project_type') == 'shader':
+                      return project
+              params = urllib.parse.urlencode({
+                  'query': expected_title,
+                  'facets': json.dumps([['project_type:shader']]),
+                  'limit': 20,
+              })
+              result = get_json('https://api.modrinth.com/v2/search?' + params)
+              normalized = expected_title.lower().replace(' ', '')
+              for project in result.get('hits', []):
+                  title = project.get('title', '').lower().replace(' ', '')
+                  if normalized in title or title in normalized:
+                      return get_json(f"https://api.modrinth.com/v2/project/{project['project_id']}")
+              raise RuntimeError(f'cannot resolve official Modrinth project for {expected_title}')
+
+          def resolve_pack(project):
+              versions = get_json(f"https://api.modrinth.com/v2/project/{project['id']}/version")
+              versions.sort(key=lambda item: item.get('date_published', ''), reverse=True)
+              failures = []
+              for version in versions[:30]:
+                  if version.get('version_type') not in ('release', 'beta'):
+                      continue
+                  files = sorted(version.get('files', []), key=lambda item: not item.get('primary', False))
+                  for file in files:
+                      filename = file.get('filename', '')
+                      if not filename.lower().endswith('.zip'):
+                          continue
+                      try:
+                          payload = get_bytes(file['url'])
+                          with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                              names = archive.namelist()
+                              voxy_entries = [name for name in names if name.lower().endswith('/voxy.json') or name.lower() == 'voxy.json']
+                              if not voxy_entries:
+                                  failures.append(f"{version['id']}:{filename}:no-voxy-json")
+                                  continue
+                              patch_entries = []
+                              for name in names:
+                                  lower = name.lower()
+                                  if '/voxy' in lower or lower.startswith('voxy'):
+                                      if not name.endswith('/'):
+                                          patch_entries.append(name)
+                              return {
+                                  'project_id': project['id'],
+                                  'slug': project['slug'],
+                                  'title': project['title'],
+                                  'source_url': project.get('source_url'),
+                                  'version_id': version['id'],
+                                  'version_number': version['version_number'],
+                                  'version_name': version['name'],
+                                  'date_published': version['date_published'],
+                                  'filename': filename,
+                                  'download_url': file['url'],
+                                  'sha512': hashlib.sha512(payload).hexdigest(),
+                                  'size': len(payload),
+                                  'voxy_entries': voxy_entries,
+                                  'voxy_related_entries': patch_entries,
+                              }
+                      except Exception as exception:
+                          failures.append(f"{version.get('id')}:{filename}:{exception}")
+              raise RuntimeError(
+                  f"no Voxy-capable archive found for {project['title']}; " + '; '.join(failures[-10:])
+              )
+
+          definitions = {
+              'complementary_reimagined': (
+                  ['complementary-reimagined', 'complementary-reimagined-shaders'],
+                  'Complementary Reimagined',
+              ),
+              'photon': (
+                  ['photon-shader', 'photon'],
+                  'Photon Shader',
+              ),
+          }
+          selected = {}
+          for key, (slugs, title) in definitions.items():
+              selected[key] = resolve_pack(find_project(slugs, title))
+
+          Path('SHADERPACK_MATRIX.json').write_text(
+              json.dumps({'schema': 1, 'packs': selected}, indent=2) + '\n', encoding='utf-8'
+          )
+          Path('SHADERPACK_FIXTURES_RESOLVED').write_text('ok\n')
+          PY
+      - name: Commit pinned fixture metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add SHADERPACK_MATRIX.json SHADERPACK_FIXTURES_RESOLVED
+          git commit -m 'test: pin Photon and Complementary Voxy shader fixtures'
+          git push origin HEAD:forge-1.19.2

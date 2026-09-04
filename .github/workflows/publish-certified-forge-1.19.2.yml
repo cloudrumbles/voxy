@@ -1,0 +1,125 @@
+name: Publish certified Forge 1.19.2 shader build (one-shot)
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - '.github/workflows/publish-certified-forge-1.19.2.yml'
+
+permissions:
+  actions: read
+  contents: write
+  pull-requests: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verify and download the certified artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s RELEASE_READY.json
+          validated_sha="$(python3 -c 'import json; print(json.load(open("RELEASE_READY.json"))["validated_commit"])')"
+          run_id="$(python3 -c 'import json; print(json.load(open("RELEASE_READY.json"))["workflow_run_id"])')"
+          git merge-base --is-ancestor "$validated_sha" HEAD
+          mkdir -p certified-release
+          gh run download "$run_id" --repo "$REPOSITORY" \
+            --name "release-jar-$validated_sha" --dir certified-release
+          mapfile -t jars < <(find certified-release -type f -name '*-all.jar' -print | sort)
+          test "${#jars[@]}" -eq 1
+          actual="$(sha256sum "${jars[0]}" | awk '{print $1}')"
+          expected="$(python3 -c 'import json; print(json.load(open("RELEASE_READY.json"))["artifact"]["sha256"])')"
+          test "$actual" = "$expected"
+          printf '%s  %s\n' "$actual" "$(basename "${jars[0]}")" > certified-release/SHA256SUMS
+          cp RELEASE_READY.json OCULUS_1_19_2.json SHADERPACK_MATRIX.json SHADER_SUPPORT.md certified-release/
+      - name: Publish release and update the port pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='voxy-forge-1.19.2-oculus-r1'
+          validated_sha="$(python3 -c 'import json; print(json.load(open("RELEASE_READY.json"))["validated_commit"])')"
+          oculus="$(python3 -c 'import json; print(json.load(open("OCULUS_1_19_2.json"))["version_number"])')"
+          photon="$(python3 -c 'import json; print(json.load(open("SHADERPACK_MATRIX.json"))["packs"]["photon"]["version_number"])')"
+          complementary="$(python3 -c 'import json; print(json.load(open("SHADERPACK_MATRIX.json"))["packs"]["complementary_reimagined"]["version_number"])')"
+          cat > certified-release/RELEASE_NOTES.md <<EOF
+          Voxy 0.2.14-alpha backport for Minecraft 1.19.2 / Forge 43.5.2.
+
+          Certified client stack:
+          - Java 17
+          - Embeddium 0.3.32-beta.90+mc1.19.2
+          - Oculus $oculus
+          - Photon $photon
+          - Complementary Reimagined $complementary
+
+          The packaged-client gate verified title boot, clean-server world entry,
+          the live Voxy renderer, the Oculus-aware Voxy shader pipeline, shader
+          patch loading, terrain passes, persistence writes, a complete process
+          restart, and persistence reads. The ordinary non-shader path passed the
+          same regression contract.
+
+          Install the `-all.jar`; the slim development JAR is not distributable.
+          See SHADER_SUPPORT.md and RELEASE_READY.json for the exact boundary.
+          EOF
+          if gh release view "$tag" --repo "$REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" certified-release/*-all.jar \
+              certified-release/SHA256SUMS certified-release/RELEASE_READY.json \
+              certified-release/OCULUS_1_19_2.json certified-release/SHADERPACK_MATRIX.json \
+              certified-release/SHADER_SUPPORT.md --repo "$REPOSITORY" --clobber
+          else
+            gh release create "$tag" certified-release/*-all.jar \
+              certified-release/SHA256SUMS certified-release/RELEASE_READY.json \
+              certified-release/OCULUS_1_19_2.json certified-release/SHADERPACK_MATRIX.json \
+              certified-release/SHADER_SUPPORT.md \
+              --repo "$REPOSITORY" --target "$validated_sha" \
+              --title 'Voxy Forge 1.19.2 with Oculus shader support' \
+              --notes-file certified-release/RELEASE_NOTES.md
+          fi
+          cat > /tmp/pr-body.md <<EOF
+          ## Forge 1.19.2 functional backport
+
+          This ports the Voxy 0.2.14-alpha renderer and persistence stack to
+          Minecraft 1.19.2 / Forge 43.5.2 / Java 17.
+
+          The branch now includes optional legacy-Iris/Oculus integration and is
+          certified with Photon and Complementary Reimagined. The exact tested
+          versions are pinned in `OCULUS_1_19_2.json` and
+          `SHADERPACK_MATRIX.json`.
+
+          The complete same-commit release gate passed:
+          - unit and data-layout parity tests;
+          - Forge compilation, reobfuscation, and exact packaged dependencies;
+          - ordinary Embeddium title/world/render/persist/restart/reopen;
+          - Oculus + Photon shader pipeline and pack patch loading;
+          - Oculus + Complementary Reimagined shader pipeline and pack patch loading.
+
+          Release: https://github.com/$REPOSITORY/releases/tag/$tag
+          Certified commit: `$validated_sha`
+          EOF
+          gh pr edit 2 --repo "$REPOSITORY" --body-file /tmp/pr-body.md
+          python3 - <<PY
+          import json
+          from pathlib import Path
+          ready = json.loads(Path('RELEASE_READY.json').read_text())
+          Path('PUBLISHED_RELEASE.json').write_text(json.dumps({
+              'tag': '$tag',
+              'release_url': 'https://github.com/$REPOSITORY/releases/tag/$tag',
+              'validated_commit': ready['validated_commit'],
+              'artifact': ready['artifact'],
+          }, indent=2) + '\n')
+          PY
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add PUBLISHED_RELEASE.json
+          git commit -m 'release: record the published Forge 1.19.2 shader build'
+          git push origin HEAD:forge-1.19.2

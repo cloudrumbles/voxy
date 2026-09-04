@@ -1,104 +1,85 @@
 package me.cortex.voxy.client.iris;
 
 import me.cortex.voxy.client.config.VoxyConfig;
-import me.cortex.voxy.client.core.IVoxyRenderSystemHolder;
-import net.irisshaders.iris.gl.uniform.UniformHolder;
+import me.cortex.voxy.client.core.IGetVoxyRenderSystem;
+import net.coderbot.iris.gl.uniform.UniformHolder;
+import net.minecraft.client.Minecraft;
 import org.joml.Matrix4f;
 import org.joml.Matrix4fc;
 
 import java.util.function.Supplier;
 
-import static net.irisshaders.iris.gl.uniform.UniformUpdateFrequency.PER_FRAME;
+import static net.coderbot.iris.gl.uniform.UniformUpdateFrequency.PER_FRAME;
 
-public class VoxyUniforms {
-    //TODO: fix this so that it directly capturesthe render system? (or atleast the holder?)
-
-    public static Matrix4f getViewProjection() {//This is 1 frame late ;-; cries, since the update occurs _before_ the voxy render pipeline
-        var vrs = IVoxyRenderSystemHolder.getNullable();
-        if (vrs == null) {
-            return new Matrix4f();
-        }
-        return new Matrix4f(vrs.getViewport().MVP);
+public final class VoxyUniforms {
+    private VoxyUniforms() {
     }
 
-    public static Matrix4f getModelView() {//This is 1 frame late ;-; cries, since the update occurs _before_ the voxy render pipeline
-        var vrs = IVoxyRenderSystemHolder.getNullable();
-        if (vrs == null) {
-            return new Matrix4f();
-        }
-        return new Matrix4f(vrs.getViewport().modelView);
+    private static Matrix4f viewProjection() {
+        var renderer = renderer();
+        return renderer == null ? new Matrix4f() : new Matrix4f(renderer.getViewport().MVP);
     }
 
-    public static Matrix4f getProjection() {//This is 1 frame late ;-; cries, since the update occurs _before_ the voxy render pipeline
-        var vrs = IVoxyRenderSystemHolder.getNullable();
-        if (vrs == null) {
+    private static Matrix4f modelView() {
+        var renderer = renderer();
+        return renderer == null ? new Matrix4f() : new Matrix4f(renderer.getViewport().modelView);
+    }
+
+    private static Matrix4f projection() {
+        var renderer = renderer();
+        if (renderer == null || renderer.getViewport().projection == null) {
             return new Matrix4f();
         }
-        var mat = vrs.getViewport().projection;
-        if (mat == null) {
-            return new Matrix4f();
+        return new Matrix4f(renderer.getViewport().projection);
+    }
+
+    private static me.cortex.voxy.client.core.VoxyRenderSystem renderer() {
+        var levelRenderer = Minecraft.getInstance().levelRenderer;
+        if (!(levelRenderer instanceof IGetVoxyRenderSystem access)) {
+            return null;
         }
-        return new Matrix4f(mat);
+        return access.voxy$getRenderSystem();
     }
 
     public static void addUniforms(UniformHolder uniforms) {
         uniforms
-                .uniform1i(PER_FRAME, "vxRenderDistance", ()->Math.round(VoxyConfig.CONFIG.sectionRenderDistance*32))//In chunks
-                .uniformMatrix(PER_FRAME, "vxViewProj", VoxyUniforms::getViewProjection)
-                .uniformMatrix(PER_FRAME, "vxViewProjInv", new Inverted(VoxyUniforms::getViewProjection))
-                .uniformMatrix(PER_FRAME, "vxViewProjPrev", new PreviousMat(VoxyUniforms::getViewProjection))
-                .uniformMatrix(PER_FRAME, "vxModelView", VoxyUniforms::getModelView)
-                .uniformMatrix(PER_FRAME, "vxModelViewInv", new Inverted(VoxyUniforms::getModelView))
-                .uniformMatrix(PER_FRAME, "vxModelViewPrev", new PreviousMat(VoxyUniforms::getModelView))
-                .uniformMatrix(PER_FRAME, "vxProj", VoxyUniforms::getProjection)
-                .uniformMatrix(PER_FRAME, "vxProjInv", new Inverted(VoxyUniforms::getProjection))
-                .uniformMatrix(PER_FRAME, "vxProjPrev", new PreviousMat(VoxyUniforms::getProjection));
-
-        /*
-        if (IrisShaderPatch.IMPERSONATE_DISTANT_HORIZONS) {
-            uniforms
-                    .uniform1f(PER_FRAME, "dhNearPlane", ()->16)//Presently hardcoded in voxy
-                    .uniform1f(PER_FRAME, "dhFarPlane", ()->16*3000)//Presently hardcoded in voxy
-
-                    .uniform1i(PER_FRAME, "dhRenderDistance", ()->Math.round(VoxyConfig.CONFIG.sectionRenderDistance*32*16))//In blocks
-                    .uniformMatrix(PER_FRAME, "dhProjection", VoxyUniforms::getProjection)
-                    .uniformMatrix(PER_FRAME, "dhProjectionInverse", new Inverted(VoxyUniforms::getProjection))
-                    .uniformMatrix(PER_FRAME, "dhPreviousProjection", new PreviousMat(VoxyUniforms::getProjection));
-        }*/
+                .uniform1i(PER_FRAME, "vxRenderDistance",
+                        () -> Math.round(VoxyConfig.CONFIG.sectionRenderDistance * 32))
+                .uniformMatrixFromArray(PER_FRAME, "vxViewProj", matrix(VoxyUniforms::viewProjection))
+                .uniformMatrixFromArray(PER_FRAME, "vxViewProjInv", inverted(VoxyUniforms::viewProjection))
+                .uniformMatrixFromArray(PER_FRAME, "vxViewProjPrev", previous(VoxyUniforms::viewProjection))
+                .uniformMatrixFromArray(PER_FRAME, "vxModelView", matrix(VoxyUniforms::modelView))
+                .uniformMatrixFromArray(PER_FRAME, "vxModelViewInv", inverted(VoxyUniforms::modelView))
+                .uniformMatrixFromArray(PER_FRAME, "vxModelViewPrev", previous(VoxyUniforms::modelView))
+                .uniformMatrixFromArray(PER_FRAME, "vxProj", matrix(VoxyUniforms::projection))
+                .uniformMatrixFromArray(PER_FRAME, "vxProjInv", inverted(VoxyUniforms::projection))
+                .uniformMatrixFromArray(PER_FRAME, "vxProjPrev", previous(VoxyUniforms::projection));
     }
 
-
-
-
-    private record Inverted(Supplier<Matrix4fc> parent) implements Supplier<Matrix4fc> {
-        private Inverted(Supplier<Matrix4fc> parent) {
-            this.parent = parent;
-        }
-
-        public Matrix4fc get() {
-            Matrix4f copy = new Matrix4f(this.parent.get());
-            copy.invert();
-            return copy;
-        }
-
-        public Supplier<Matrix4fc> parent() {
-            return this.parent;
-        }
+    private static Supplier<float[]> matrix(Supplier<? extends Matrix4fc> source) {
+        return () -> toArray(source.get());
     }
 
-    private static class PreviousMat implements Supplier<Matrix4fc> {
-        private final Supplier<Matrix4fc> parent;
-        private Matrix4f previous;
+    private static Supplier<float[]> inverted(Supplier<? extends Matrix4fc> source) {
+        return () -> toArray(new Matrix4f(source.get()).invert());
+    }
 
-        PreviousMat(Supplier<Matrix4fc> parent) {
-            this.parent = parent;
-            this.previous = new Matrix4f();
-        }
+    private static Supplier<float[]> previous(Supplier<? extends Matrix4fc> source) {
+        return new Supplier<>() {
+            private Matrix4f previous = new Matrix4f();
 
-        public Matrix4fc get() {
-            Matrix4f previous = this.previous;
-            this.previous = new Matrix4f(this.parent.get());
-            return previous;
-        }
+            @Override
+            public float[] get() {
+                Matrix4f result = this.previous;
+                this.previous = new Matrix4f(source.get());
+                return toArray(result);
+            }
+        };
+    }
+
+    private static float[] toArray(Matrix4fc matrix) {
+        float[] values = new float[16];
+        matrix.get(values);
+        return values;
     }
 }

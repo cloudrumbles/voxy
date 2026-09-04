@@ -11,7 +11,7 @@ import me.cortex.voxy.client.core.rendering.section.backend.AbstractSectionRende
 import me.cortex.voxy.client.core.rendering.util.DepthFramebuffer;
 import me.cortex.voxy.client.core.rendering.util.UploadStream;
 import me.cortex.voxy.client.iris.IrisVoxyRenderPipelineData;
-import net.irisshaders.iris.shaderpack.materialmap.WorldRenderingSettings;
+import net.coderbot.iris.block_rendering.BlockRenderingSettings;
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL30;
 
@@ -24,20 +24,16 @@ import static org.lwjgl.opengl.GL31.GL_UNIFORM_BUFFER;
 import static org.lwjgl.opengl.GL45C.*;
 
 public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
-    private static final int UNIFORM_BINDING_POINT = 7;//TODO make ths binding point... not randomly 5
-    private static final int BASE_BUFFER_BINDING_INDEX = 10;//TODO make ths binding point... not randomly 10
-    private static final int BASE_SAMPLER_BINDING_INDEX = 6;//TODO make ths binding point... not randomly 6
-
     private final IrisVoxyRenderPipelineData data;
-    private final FullscreenBlit depthBlit;
+    private final FullscreenBlit depthBlit = new FullscreenBlit("voxy:post/blit_texture_depth_cutout.frag");
     public final DepthFramebuffer fbTranslucent = new DepthFramebuffer(this.fb.getFormat());
 
     private final FullscreenBlit shaderDepthHackFixTransformBlit;
 
     private final GlBuffer shaderUniforms;
 
-    public IrisVoxyRenderPipeline(RenderProperties properties, IrisVoxyRenderPipelineData data, AsyncNodeManager nodeManager, NodeCleaner nodeCleaner, HierarchicalOcclusionTraverser traversal, BooleanSupplier frexSupplier) {
-        super(properties, nodeManager, nodeCleaner, traversal, frexSupplier, data.shouldDeferTranslucency());
+    public IrisVoxyRenderPipeline(IrisVoxyRenderPipelineData data, AsyncNodeManager nodeManager, NodeCleaner nodeCleaner, HierarchicalOcclusionTraverser traversal, BooleanSupplier frexSupplier) {
+        super(nodeManager, nodeCleaner, traversal, frexSupplier, data.shouldDeferTranslucency());
         this.data = data;
         if (this.data.thePipeline != null) {
             throw new IllegalStateException("Pipeline data already bound");
@@ -71,17 +67,20 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
         }
 
         if (!this.data.skipShaderDepthHackFix) {
-            this.shaderDepthHackFixTransformBlit = new FullscreenBlit(properties, "voxy:post/fullscreen2.vert", "voxy:post/noop.frag");
+            this.shaderDepthHackFixTransformBlit = new FullscreenBlit("voxy:post/fullscreen2.vert", "voxy:post/noop.frag");
         } else {
             this.shaderDepthHackFixTransformBlit = null;
         }
+    }
 
-        this.depthBlit = new FullscreenBlit(properties, "voxy:post/blit_texture_depth_cutout.frag");
+    @Override
+    public boolean isUsingPipelineData(Object pipelineData) {
+        return this.data == pipelineData;
     }
 
     @Override
     public void setupExtraModelBakeryData(ModelBakerySubsystem modelService) {
-        modelService.factory.setCustomBlockStateMapping(WorldRenderingSettings.INSTANCE.getBlockStateIds());
+        modelService.factory.setCustomBlockStateMapping(BlockRenderingSettings.INSTANCE.getBlockStateIds());
     }
 
     @Override
@@ -117,7 +116,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     }
 
     @Override
-    protected int setup(Viewport<?> viewport, int sourceDepthTexture, int srcWidth, int srcHeight) {
+    protected int setup(Viewport<?> viewport, int sourceFramebuffer, int srcWidth, int srcHeight) {
         this.fb.resize(viewport.width, viewport.height);
         this.fbTranslucent.resize(viewport.width, viewport.height);
 
@@ -132,12 +131,12 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             srcWidth = viewport.width;
             srcHeight = viewport.height;
         }
-        this.initDepthStencil(sourceDepthTexture, this.fb.framebuffer.id, srcWidth, srcHeight, viewport.width, viewport.height);
+        this.initDepthStencil(sourceFramebuffer, this.fb.framebuffer.id, srcWidth, srcHeight, viewport.width, viewport.height);
         return this.fb.getDepthTex().id;
     }
 
     @Override
-    protected void postOpaquePreTranslucent(Viewport<?> viewport, int sourceDepthTexture) {
+    protected void postOpaquePreTranslucent(Viewport<?> viewport, int sourceFrameBuffer) {
         if (this.shaderDepthHackFixTransformBlit != null) {
             this.fb.bind();
             glEnable(GL_DEPTH_TEST);
@@ -146,7 +145,7 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
             glStencilFunc(GL_EQUAL, 0, 0xFF);//set the depth to 1 where the mask is 0
             this.shaderDepthHackFixTransformBlit.blit();
             glStencilFunc(GL_EQUAL, 1, 0xFF);//revert the mask test
-            glDepthFunc(this.properties.closerEqualDepthCompare());
+            glDepthFunc(GL_LEQUAL);
             glColorMask(true, true, true, true);
         }
 
@@ -166,21 +165,13 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     }
 
     @Override
-    protected void finish(Viewport<?> viewport, int sourceDepthTexture, int outputFramebuffer, int srcWidth, int srcHeight) {
-        if (this.data.renderToVanillaDepth) {
-            //We can only depthblit out if destination size is the same, if they arnt, force them tobe
-            boolean mustFiddledViewport = srcWidth != viewport.width  || srcHeight != viewport.height;
-            if (this.data.useViewportDims||!mustFiddledViewport) {
-                glColorMask(false, false, false, false);
-                if (mustFiddledViewport)
-                    glViewport(0, 0, viewport.width, viewport.height);
-                AbstractRenderPipeline.transformBlitDepth(this.depthBlit,
-                        this.fbTranslucent.getDepthTex().id, outputFramebuffer,
-                        viewport, new Matrix4f(viewport.vanillaProjection).mul(viewport.modelView));
-                if (mustFiddledViewport)
-                    glViewport(0, 0, srcWidth, srcHeight);
-                glColorMask(true, true, true, true);
-            }
+    protected void finish(Viewport<?> viewport, int sourceFrameBuffer, int srcWidth, int srcHeight) {
+        if (this.data.renderToVanillaDepth && srcWidth == viewport.width  && srcHeight == viewport.height) {//We can only depthblit out if destination size is the same
+            glColorMask(false, false, false, false);
+            AbstractRenderPipeline.transformBlitDepth(this.depthBlit,
+                    this.fbTranslucent.getDepthTex().id, sourceFrameBuffer,
+                    viewport, new Matrix4f(viewport.vanillaProjection).mul(viewport.modelView));
+            glColorMask(true, true, true, true);
         } else {
             // normally disabled by AbstractRenderPipeline but since we are skipping it we do it here
             glDisable(GL_STENCIL_TEST);
@@ -204,13 +195,12 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
     private void doBindings() {
         this.bindUniforms();
         if (this.data.getSsboSet() != null) {
-            this.data.getSsboSet().bindingFunction().accept(BASE_BUFFER_BINDING_INDEX);
+            this.data.getSsboSet().bindingFunction().accept(10);
         }
         if (this.data.getImageSet() != null) {
-            this.data.getImageSet().bindingFunction().accept(BASE_SAMPLER_BINDING_INDEX);
+            this.data.getImageSet().bindingFunction().accept(6);
         }
     }
-
     @Override
     public void setupAndBindOpaque(Viewport<?> viewport) {
         this.fb.bind();
@@ -232,6 +222,8 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
         super.addDebug(debug);
     }
 
+    private static final int UNIFORM_BINDING_POINT = 7;//TODO make ths binding point... not randomly 5
+
     private StringBuilder buildGenericShaderHeader(AbstractSectionRenderer<?, ?> renderer, String input) {
         StringBuilder builder = new StringBuilder(input).append("\n\n\n");
 
@@ -242,12 +234,12 @@ public class IrisVoxyRenderPipeline extends AbstractRenderPipeline {
         }
 
         if (this.data.getSsboSet() != null) {
-            builder.append("#define BUFFER_BINDING_INDEX_BASE "+BASE_BUFFER_BINDING_INDEX+"\n");
+            builder.append("#define BUFFER_BINDING_INDEX_BASE 10\n");//TODO: DONT RANDOMLY MAKE THIS 10
             builder.append(this.data.getSsboSet().layout()).append("\n\n");
         }
 
         if (this.data.getImageSet() != null) {
-            builder.append("#define BASE_SAMPLER_BINDING_INDEX "+BASE_SAMPLER_BINDING_INDEX+"\n");
+            builder.append("#define BASE_SAMPLER_BINDING_INDEX 6\n");//TODO: DONT RANDOMLY MAKE THIS 6
             builder.append(this.data.getImageSet().layout()).append("\n\n");
         }
 

@@ -1,7 +1,7 @@
 package me.cortex.voxy.client.core.model;
 
-import net.caffeinemc.mods.sodium.client.util.color.ColorSRGB;
-import net.minecraft.util.ARGB;
+import me.jellysquid.mods.sodium.client.util.color.ColorSRGB;
+import net.minecraft.client.renderer.texture.MipmapGenerator;
 
 import java.util.Arrays;
 
@@ -39,33 +39,6 @@ public class TextureUtils {
             return ((data.colour()[index] >>> 24) & 0xff) > 1;
         }
         throw new IllegalArgumentException();
-    }
-
-
-    public static boolean hasTranslucentPixel(ColourDepthTextureData data) {
-        for (int i = 0; i < data.colour().length; i++) {
-            int alpha = data.colour()[i]>>>24;
-            int depth = data.depth()[i];
-            if ((depth&0xFF)!=0) {//only check on written pixels
-                if (alpha!=0&&alpha!=255) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    public static boolean isSolidWhereDrawn(ColourDepthTextureData data) {
-        for (int i = 0; i < data.colour().length; i++) {
-            int alpha = data.colour()[i]>>>24;
-            int depth = data.depth()[i];
-            if ((depth&0xFF)!=0) {//only check on written pixels
-                if (alpha!=255) {
-                    return false;
-                }
-            }
-        }
-        return true;
     }
 
 
@@ -281,5 +254,4 @@ public class TextureUtils {
                 darkend ? ((int) a) / 4 : ARGB.linearToSrgbChannel(a / 4)
         );
     }
-
 }

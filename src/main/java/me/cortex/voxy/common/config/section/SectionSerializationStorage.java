@@ -12,12 +12,22 @@ import me.cortex.voxy.common.world.other.Mapper;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongConsumer;
 
 public class SectionSerializationStorage extends SectionStorage {
     public static final int BIGGEST_SERIALIZED_SECTION_SIZE = 32 * 32 * 32 * 8 * 2 + 8;
 
+    /*
+     * Process-local counters used by the opt-in runtime validation probe. They
+     * also provide harmless diagnostics for ordinary launches.
+     */
+    private static final AtomicLong LOAD_ATTEMPTS = new AtomicLong();
+    private static final AtomicLong SUCCESSFUL_LOADS = new AtomicLong();
+    private static final AtomicLong SUCCESSFUL_SAVES = new AtomicLong();
+
     private final StorageBackend backend;
+
     public SectionSerializationStorage(StorageBackend storageBackend) {
         this.backend = storageBackend;
     }
@@ -25,6 +35,7 @@ public class SectionSerializationStorage extends SectionStorage {
     private static final ThreadLocalMemoryBuffer MEMORY_CACHE = new ThreadLocalMemoryBuffer(BIGGEST_SERIALIZED_SECTION_SIZE + 1024);
 
     public int loadSection(WorldSection into) {
+        LOAD_ATTEMPTS.incrementAndGet();
         var data = this.backend.getSectionData(into.key, MEMORY_CACHE.get().createUntrackedUnfreeableReference());
         if (data != null) {
             if (!SaveLoadSystem3.deserialize(into, data)) {
@@ -34,6 +45,7 @@ public class SectionSerializationStorage extends SectionStorage {
                 Logger.error("Section " + into.lvl + ", " + into.x + ", " + into.y + ", " + into.z + " was unable to load, removing");
                 return -1;
             } else {
+                SUCCESSFUL_LOADS.incrementAndGet();
                 return 0;
             }
         } else {
@@ -44,12 +56,24 @@ public class SectionSerializationStorage extends SectionStorage {
         }
     }
 
-
     @Override
     public void saveSection(WorldSection section) {
         var saveData = SaveLoadSystem3.serialize(section);
         this.backend.setSectionData(section.key, saveData);
+        SUCCESSFUL_SAVES.incrementAndGet();
         //Note that savedData isnt freed (the save system uses a cache)
+    }
+
+    public static long getLoadAttemptCount() {
+        return LOAD_ATTEMPTS.get();
+    }
+
+    public static long getSuccessfulLoadCount() {
+        return SUCCESSFUL_LOADS.get();
+    }
+
+    public static long getSuccessfulSaveCount() {
+        return SUCCESSFUL_SAVES.get();
     }
 
     @Override

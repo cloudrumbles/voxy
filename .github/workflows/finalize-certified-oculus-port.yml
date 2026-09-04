@@ -1,0 +1,168 @@
+name: Finalize certified Oculus port (one-shot)
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - 'RELEASE_READY.json'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-certified-oculus-port
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Verify certification applies to the parent source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          ready = json.loads(Path('RELEASE_READY.json').read_text())
+          parent = subprocess.check_output(['git', 'rev-parse', 'HEAD^'], text=True).strip()
+          if ready.get('validated_commit') != parent:
+              raise SystemExit(
+                  f"certification is for {ready.get('validated_commit')}, expected parent {parent}"
+              )
+          PY
+      - name: Remove one-shot scaffolding and write installation documentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/discover-legacy-oculus-api.yml \
+            .github/workflows/discover-legacy-oculus-api-push.yml \
+            .github/workflows/import-legacy-oculus-integration.yml \
+            .github/workflows/prepare-oculus-port.yml \
+            .github/workflows/prepare-shader-runtime-validation.yml \
+            .github/workflows/ensure-oculus-pipeline-selection.yml \
+            .github/workflows/resolve-voxy-shaderpacks.yml \
+            .github/workflows/certify-oculus-shader-port.yml \
+            .github/workflows/inspect-release-gate.yml \
+            .github/workflows/finalize-certified-oculus-port.yml \
+            ci/prepare-oculus-port.py \
+            ci/prepare-shader-runtime-validation.py \
+            ci/ensure-oculus-pipeline-selection.py \
+            LEGACY_OCULUS_BASELINE.json \
+            LEGACY_OCULUS_IMPORT.json \
+            LEGACY_OCULUS_COMPILE.log \
+            LEGACY_OCULUS_COMPILE_SUCCESS \
+            OCULUS_PORT_PREPARATION.json \
+            OCULUS_CORE_BUILD_GREEN \
+            OCULUS_PIPELINE_SELECTION_GREEN \
+            SHADERPACK_FIXTURES_RESOLVED \
+            SHADER_RUNTIME_INSTRUMENTATION_GREEN \
+            OCULUS_SHADER_RUNTIME_GREEN.json \
+            RELEASE_GATE_INSPECTION.json \
+            RELEASE_GATE_INSPECTION_SUCCESS \
+            RELEASE_FAILURE.txt \
+            RELEASE_READY.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          oculus = json.loads(Path('OCULUS_1_19_2.json').read_text())
+          packs = json.loads(Path('SHADERPACK_MATRIX.json').read_text())['packs']
+          complementary = packs['complementary_reimagined']
+          photon = packs['photon']
+
+          readme = f'''# Voxy for Forge 1.19.2
+
+This branch is a functional Forge backport of Voxy 0.2.14-alpha for Minecraft 1.19.2. It retains the real terrain renderer, model bakery, chunk ingestion, level-of-detail generation, and persistent section storage.
+
+## Requirements
+
+- Minecraft 1.19.2
+- Forge 43.5.2
+- Java 17
+- Embeddium `0.3.32-beta.90+mc1.19.2`
+- an OpenGL 4.6 / GLSL 4.60-capable graphics implementation
+
+For shader packs, also install Oculus `{oculus['version_number']}`. The exact Oculus file and tested shader-pack releases are pinned by hash in `OCULUS_1_19_2.json` and `SHADERPACK_MATRIX.json`.
+
+## Install
+
+Build with:
+
+```bash
+./gradlew --no-daemon clean test build jarJar
+```
+
+Install the generated `build/libs/*-all.jar` together with the exact Embeddium build above. The `-all.jar` is the distributable; the slim JAR is not self-contained. Voxy is client-side and does not need to be installed on the server.
+
+For shaders, place Oculus and one shader-pack ZIP in the usual client folders, enable the pack from Video Settings, and leave Voxy enabled. The automated installed-client suite currently validates:
+
+- Photon `{photon['version_number']}`
+- Complementary Reimagined `{complementary['version_number']}`
+
+## Validation
+
+The release gate compiles on Java 17, runs unit and parity tests, reobfuscates the Forge artifact, verifies every embedded runtime dependency and native, and then launches the packaged JAR in separate client processes. It covers title startup, clean-server world entry, real Voxy terrain passes, section writes, full shutdown, restart, and section reads. The same contract runs without Oculus and with each supported shader pack.
+
+See `PORTING.md`, `SHADER_SUPPORT.md`, and `FUNCTIONAL_BASELINE.md` for the exact compatibility boundary.
+'''
+          Path('README.md').write_text(readme, encoding='utf-8')
+
+          shaders = f'''# Oculus shader-pack support
+
+The Forge 1.19.2 port includes the legacy `net.coderbot.iris` integration required by Oculus. It consumes the same Voxy patch files shipped by current shader packs instead of substituting a generic post-processing path. This matters because pack-defined draw buffers, uniforms, samplers, shadow rendering, water reflections, and material data remain under the shader pack's control.
+
+## Certified combination
+
+- Oculus: `{oculus['version_number']}` (`{oculus['id']}`)
+- Photon: `{photon['version_number']}` (`{photon['version_id']}`)
+- Complementary Reimagined: `{complementary['version_number']}` (`{complementary['version_id']}`)
+- Embeddium: `0.3.32-beta.90+mc1.19.2`
+- Forge: `43.5.2`
+- Java: `17`
+
+The JSON manifests in the repository pin filenames, source URLs, release identifiers, and SHA-512 hashes. Newer pack or Oculus releases may work, but they are not represented as certified until the same matrix passes against them.
+
+## What the test proves
+
+For each pack, the test starts the final packaged Voxy JAR with Oculus and the pack enabled, verifies that Oculus reports shaders active, verifies that Voxy creates its Iris/Oculus pipeline, verifies that the pack's Voxy patch is parsed, completes real terrain render passes, persists generated sections, terminates the process, starts a fresh process, and reads the persisted sections again. The non-shader configuration is tested independently to prevent regressions.
+
+Hardware drivers and arbitrary modpacks can still expose vendor- or interaction-specific faults. A passing software-OpenGL matrix establishes the integration contract; it is not a claim that every unrelated rendering mod is compatible.
+'''
+          Path('SHADER_SUPPORT.md').write_text(shaders, encoding='utf-8')
+
+          porting = '''# Voxy Forge 1.19.2 port contract
+
+This branch targets Minecraft 1.19.2, Forge 43.5.2, Java 17, and Embeddium `0.3.32-beta.90+mc1.19.2`. Loader integration is adapted to Forge while persistent formats, coordinate packing, voxel and mip layouts, configuration defaults, and the selected Voxy rendering behaviour remain aligned with the functional upstream baseline.
+
+The port is complete only when one branch revision passes all of these gates:
+
+1. Java 17 regression tests for core data layouts and multiplayer storage isolation.
+2. Full Forge compilation, production reobfuscation, and distributable JarJar creation.
+3. Exact dependency, mixin, refmap, access-transformer, and native-library verification.
+4. Installed-artifact title boot and non-shader world rendering with Embeddium.
+5. Installed-artifact world rendering with Oculus and Photon.
+6. Installed-artifact world rendering with Oculus and Complementary Reimagined.
+7. Non-empty section persistence, complete process restart, and successful section deserialization in every runtime configuration.
+
+The server does not require Voxy. Optional integrations outside the tested Embeddium/Oculus boundary are not implied. See `SHADER_SUPPORT.md` for the exact shader versions and evidence contract.
+'''
+          Path('PORTING.md').write_text(porting, encoding='utf-8')
+          PY
+          printf 'clean-final-%s\n' "$GITHUB_SHA" > FINAL_RELEASE_GATE_TRIGGER
+      - name: Commit the clean release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add -A
+          git commit -m 'docs: finalize the Forge 1.19.2 Oculus shader port'
+          git push origin HEAD:forge-1.19.2

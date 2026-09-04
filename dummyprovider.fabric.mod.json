@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "id": "sodiumprovider",
-  "name": "sodiumprovider",
-  "version": "${sodium_version}",
-  "environment": "server",
-  "provides": ["sodium"]
-}

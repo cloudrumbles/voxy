@@ -1,0 +1,147 @@
+name: Inspect complete release gate (one-shot)
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - '.github/workflows/inspect-release-gate.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - name: Wait for and summarize the matching release gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target_sha="$(git rev-parse HEAD^)"
+          python3 - "$target_sha" <<'PY'
+          import io
+          import json
+          import os
+          import re
+          import sys
+          import time
+          import urllib.error
+          import urllib.request
+          import zipfile
+          from pathlib import Path
+
+          sha = sys.argv[1]
+          repo = os.environ['REPOSITORY']
+          token = os.environ['GH_TOKEN']
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'voxy-release-gate-inspector',
+          }
+
+          def get(url, accept=None):
+              local = dict(headers)
+              if accept:
+                  local['Accept'] = accept
+              request = urllib.request.Request(url, headers=local)
+              with urllib.request.urlopen(request) as response:
+                  return response.read()
+
+          def get_json(url):
+              return json.loads(get(url))
+
+          deadline = time.monotonic() + 27 * 60
+          selected = None
+          while time.monotonic() < deadline:
+              payload = get_json(
+                  f'https://api.github.com/repos/{repo}/actions/workflows/'
+                  'forge-1.19.2-release-candidate.yml/runs?branch=forge-1.19.2&per_page=20'
+              )
+              selected = next(
+                  (run for run in payload['workflow_runs'] if run['head_sha'] == sha), None
+              )
+              if selected and selected['status'] == 'completed':
+                  break
+              time.sleep(15)
+
+          if not selected:
+              raise SystemExit(f'no complete release gate found for {sha}')
+          if selected['status'] != 'completed':
+              raise SystemExit(f'complete release gate did not finish for {sha}')
+
+          jobs = get_json(selected['jobs_url'])['jobs']
+          summary = {
+              'validated_sha': sha,
+              'run_id': selected['id'],
+              'run_url': selected['html_url'],
+              'conclusion': selected['conclusion'],
+              'jobs': [
+                  {
+                      'id': job['id'],
+                      'name': job['name'],
+                      'status': job['status'],
+                      'conclusion': job['conclusion'],
+                      'failed_steps': [
+                          step['name'] for step in job.get('steps', [])
+                          if step.get('conclusion') == 'failure'
+                      ],
+                  }
+                  for job in jobs
+              ],
+          }
+          Path('RELEASE_GATE_INSPECTION.json').write_text(
+              json.dumps(summary, indent=2) + '\n', encoding='utf-8'
+          )
+
+          if selected['conclusion'] == 'success':
+              Path('RELEASE_GATE_INSPECTION_SUCCESS').write_text('ok\n')
+              raise SystemExit(0)
+
+          extracts = []
+          patterns = re.compile(
+              r'(?i)(error|exception|failed|failure|mixin|shader|oculus|iris|voxy|compile|linkage)'
+          )
+          for job in jobs:
+              if job.get('conclusion') != 'failure':
+                  continue
+              try:
+                  raw = get(
+                      f"https://api.github.com/repos/{repo}/actions/jobs/{job['id']}/logs",
+                      'application/vnd.github+json',
+                  )
+              except urllib.error.HTTPError as exception:
+                  extracts.append(f"## {job['name']}\nlog download failed: {exception}\n")
+                  continue
+              lines = raw.decode('utf-8', errors='replace').splitlines()
+              matching = [line for line in lines if patterns.search(line)]
+              selected_lines = matching[-300:] if matching else lines[-300:]
+              extracts.append(f"## {job['name']}\n" + '\n'.join(selected_lines) + '\n')
+          Path('RELEASE_FAILURE.txt').write_text('\n'.join(extracts), encoding='utf-8')
+          PY
+      - name: Commit inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git pull --rebase origin forge-1.19.2
+          git add RELEASE_GATE_INSPECTION.json
+          if [[ -f RELEASE_GATE_INSPECTION_SUCCESS ]]; then
+            git add RELEASE_GATE_INSPECTION_SUCCESS
+            message='ci: record successful complete release gate'
+          else
+            git add RELEASE_FAILURE.txt
+            message='ci: capture complete release gate failure'
+          fi
+          git commit -m "$message"
+          git push origin HEAD:forge-1.19.2

@@ -1,0 +1,17 @@
+{
+  "revision": "8f0fb93123d50a0d6d2dffcf85b8a89bd13ac317",
+  "imported": [
+    "src/main/java/me/cortex/voxy/client/core/IrisVoxyRenderPipeline.java",
+    "src/main/java/me/cortex/voxy/client/core/util/IrisUtil.java",
+    "src/main/java/me/cortex/voxy/client/iris/IGetIrisVoxyPipelineData.java",
+    "src/main/java/me/cortex/voxy/client/iris/IGetVoxyPatchData.java",
+    "src/main/java/me/cortex/voxy/client/iris/IrisShaderPatch.java",
+    "src/main/java/me/cortex/voxy/client/iris/IrisVoxyRenderPipelineData.java",
+    "src/main/java/me/cortex/voxy/client/iris/ShaderLoadError.java",
+    "src/main/java/me/cortex/voxy/client/iris/VoxySamplers.java",
+    "src/main/java/me/cortex/voxy/client/iris/VoxyUniforms.java",
+    "src/main/java/me/cortex/voxy/client/mixin/iris/MixinIrisRenderingPipeline.java",
+    "src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java",
+    "src/main/java/me/cortex/voxy/client/mixin/iris/MixinPackRenderTargetDirectives.java"
+  ]
+}

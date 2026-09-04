@@ -104,7 +104,6 @@ public class HierarchicalOcclusionTraverser {
             this.pipeline = pipeline;
         }
         this.traversal = Shader.makeAuto(PRINTF_processor)
-            .apply(pipeline.properties::apply)
             .defineIf("DEBUG", HIERARCHICAL_SHADER_DEBUG)
             .define("MAX_ITERATIONS", MAX_ITERATIONS)
             .define("LOCAL_SIZE_BITS", LOCAL_WORK_SIZE_BITS)
@@ -367,15 +366,14 @@ public class HierarchicalOcclusionTraverser {
 
             count = (int) ((this.requestBuffer.size()>>3)-1);
 
+            //Write back the clamped count
+            MemoryUtil.memPutInt(ptr-8, count);
         }
         //if (count > REQUEST_QUEUE_SIZE) {
         //    Logger.warn("Count larger than 'maxRequestCount', overflow captured. Overflowed by " + (count-REQUEST_QUEUE_SIZE));
         //}
         if (count != 0) {
-            var buffer = new MemoryBuffer(count*8L+8).cpyFrom(ptr-8);
-            //Write back the exact count into the new memory buffer (not the download stream buffer)
-            MemoryUtil.memPutInt(buffer.address, count);
-            this.nodeManager.submitRequestBatch(buffer);// the -8 is because we incremented it by 8
+            this.nodeManager.submitRequestBatch(new MemoryBuffer(count*8L+8).cpyFrom(ptr-8));// the -8 is because we incremented it by 8
         }
     }
 

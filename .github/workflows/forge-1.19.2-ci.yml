@@ -1,0 +1,141 @@
+name: Forge 1.19.2 CI
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+  pull_request:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forge-1.19.2-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      - name: Unit and parity tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p ci
+          ./gradlew --no-daemon clean test 2>&1 | tee ci/test.log
+
+      - name: Forge build and reobfuscation
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon build jarJar 2>&1 | tee ci/build.log
+
+      - name: Verify packaged metadata and runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci
+          mapfile -t jar_files < <(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print | sort)
+          if [[ "${#jar_files[@]}" -ne 1 ]]; then
+            printf 'expected exactly one distributable JAR, found %s\n' "${#jar_files[@]}" >&2
+            printf '%s\n' "${jar_files[@]:-}" >&2
+            exit 1
+          fi
+          jar_file="${jar_files[0]}"
+
+          jar tf "$jar_file" > ci/jar-entries.txt
+          grep -Fxq 'META-INF/mods.toml' ci/jar-entries.txt
+          grep -Fxq 'META-INF/jarjar/metadata.json' ci/jar-entries.txt
+          grep -Fxq 'common.voxy.mixins.json' ci/jar-entries.txt
+          grep -Fxq 'client.voxy.mixins.json' ci/jar-entries.txt
+          grep -Fxq 'client.voxy.refmap.json' ci/jar-entries.txt
+          grep -Fxq 'META-INF/accesstransformer.cfg' ci/jar-entries.txt
+          grep -Fxq 'me/cortex/voxy/client/core/VoxyRenderSystem.class' ci/jar-entries.txt
+
+          unzip -p "$jar_file" META-INF/mods.toml > ci/packaged-mods.toml
+          grep -Fq '[1.19.2,1.20)' ci/packaged-mods.toml
+          grep -Fq '[43,)' ci/packaged-mods.toml
+          if grep -R --line-number --fixed-strings 'VoxyRenderSystem (stub)' src/main/java; then
+            echo 'stub renderer detected' >&2
+            exit 1
+          fi
+          python3 ci/validate-packaged-jar.py "$jar_file" | tee ci/packaged-jar-validation.txt
+          sha256sum "$jar_file" > ci/voxy-jar.sha256
+
+      - name: Capture concise diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci
+          {
+            echo '# Forge 1.19.2 CI failure'
+            echo
+            echo "commit: ${GITHUB_SHA}"
+            echo
+            if [[ -f ci/build.log ]]; then
+              tail -n 1600 ci/build.log
+            elif [[ -f ci/test.log ]]; then
+              tail -n 1600 ci/test.log
+            else
+              echo 'No Gradle log was produced.'
+            fi
+          } > ci/last-failure.log
+
+      - name: Snapshot exact compile classpath
+        if: failure()
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon tasks --all > ci/tasks.txt
+          if grep -q '^copyCompileClasspath ' ci/tasks.txt; then
+            ./gradlew --no-daemon copyCompileClasspath 2>&1 | tee ci/classpath.log
+          fi
+
+      - name: Upload diagnostic reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: forge-1.19.2-diagnostics-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: error
+          include-hidden-files: true
+          path: |
+            ci/
+            build/compile-classpath/
+            build/reports/tests/
+            build/test-results/
+            build/tmp/compileJava/
+
+      - name: Upload distributable JAR
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: voxy-forge-1.19.2-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: error
+          path: |
+            build/libs/*-all.jar
+            ci/voxy-jar.sha256
+            ci/packaged-jar-validation.txt
