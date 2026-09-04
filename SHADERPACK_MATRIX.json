@@ -1,0 +1,73 @@
+{
+  "schema": 1,
+  "packs": {
+    "complementary_reimagined": {
+      "project_id": "HVnmMxH1",
+      "slug": "complementary-reimagined",
+      "title": "Complementary Shaders - Reimagined",
+      "source_url": "https://github.com/ComplementaryDevelopment/ComplementaryReimagined",
+      "version_id": "111gsk0f",
+      "version_number": "r5.9",
+      "version_name": "r5.9",
+      "date_published": "2026-09-02T10:48:56.090028Z",
+      "filename": "ComplementaryReimagined_r5.9.zip",
+      "download_url": "https://cdn.modrinth.com/data/HVnmMxH1/versions/111gsk0f/ComplementaryReimagined_r5.9.zip",
+      "sha512": "dfaa3a8104b491a4351ec9e0ea324ff72ec7653c3e20e0022482ee8f8cb31d00b363d9747f295b343bc1b1a6c6985d7cc73c0f5a26302d1345d80ed924530d4b",
+      "size": 552449,
+      "voxy_entries": [
+        "shaders/program/voxy.json",
+        "shaders/world-1/voxy.json",
+        "shaders/world0/voxy.json",
+        "shaders/world1/voxy.json"
+      ],
+      "voxy_related_entries": [
+        "shaders/program/voxy.json",
+        "shaders/program/voxy_opaque.glsl",
+        "shaders/program/voxy_translucent.glsl",
+        "shaders/world-1/voxy.json",
+        "shaders/world-1/voxy_opaque.glsl",
+        "shaders/world-1/voxy_translucent.glsl",
+        "shaders/world0/voxy.json",
+        "shaders/world0/voxy_opaque.glsl",
+        "shaders/world0/voxy_translucent.glsl",
+        "shaders/world1/voxy.json",
+        "shaders/world1/voxy_opaque.glsl",
+        "shaders/world1/voxy_translucent.glsl"
+      ]
+    },
+    "photon": {
+      "project_id": "lLqFfGNs",
+      "slug": "photon-shader",
+      "title": "Photon Shaders",
+      "source_url": "https://github.com/sixthsurge/photon",
+      "version_id": "gUv7fBPN",
+      "version_number": "v1.3b",
+      "version_name": "photon v1.3b",
+      "date_published": "2026-04-14T20:47:01.327987Z",
+      "filename": "photon_v1.3b.zip",
+      "download_url": "https://cdn.modrinth.com/data/lLqFfGNs/versions/gUv7fBPN/photon_v1.3b.zip",
+      "sha512": "40bcbac9c656f2965f543e4b35cd0698723b2db8b67662f1b53c14223cfbef7d60d7fbf0176f73fcadd0d1e19ba60d951ed77e9eece8c8df7dca4d2be6315309",
+      "size": 3800987,
+      "voxy_entries": [
+        "shaders/world1/voxy.json",
+        "shaders/program/voxy.json",
+        "shaders/world0/voxy.json",
+        "shaders/world-1/voxy.json"
+      ],
+      "voxy_related_entries": [
+        "shaders/world1/voxy.json",
+        "shaders/world1/voxy_opaque.glsl",
+        "shaders/world1/voxy_translucent.glsl",
+        "shaders/program/voxy.json",
+        "shaders/program/voxy_opaque.glsl",
+        "shaders/program/voxy_translucent.glsl",
+        "shaders/world0/voxy.json",
+        "shaders/world0/voxy_opaque.glsl",
+        "shaders/world0/voxy_translucent.glsl",
+        "shaders/world-1/voxy.json",
+        "shaders/world-1/voxy_opaque.glsl",
+        "shaders/world-1/voxy_translucent.glsl"
+      ]
+    }
+  }
+}
