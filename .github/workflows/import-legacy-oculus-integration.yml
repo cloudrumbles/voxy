@@ -1,0 +1,167 @@
+name: Import legacy Oculus compatibility source
+
+on:
+  push:
+    branches:
+      - forge-1.19.2
+    paths:
+      - '.github/workflows/import-legacy-oculus-integration.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  import-and-compile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Import the closest legacy Iris integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/MCRcortex/voxy.git || true
+          git fetch --force --tags upstream '+refs/heads/*:refs/remotes/upstream/*'
+          revision="$(python3 -c 'import json; print(json.load(open("LEGACY_OCULUS_BASELINE.json"))["selected_revision"])')"
+          test -n "$revision"
+          python3 - "$revision" <<'PY'
+          import json
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          revision = sys.argv[1]
+          report = json.loads(Path('LEGACY_OCULUS_BASELINE.json').read_text())
+          wanted = set(report['paths'])
+          # Include the tiny bridge interfaces and error type used by the
+          # historical pipeline when they exist at the selected revision.
+          wanted.update({
+              'src/main/java/me/cortex/voxy/client/iris/IGetIrisVoxyPipelineData.java',
+              'src/main/java/me/cortex/voxy/client/iris/IGetVoxyPatchData.java',
+              'src/main/java/me/cortex/voxy/client/iris/ShaderLoadError.java',
+          })
+          imported = []
+          for path in sorted(wanted):
+              probe = subprocess.run(
+                  ['git', 'show', f'{revision}:{path}'], capture_output=True
+              )
+              if probe.returncode != 0:
+                  continue
+              target = Path(path)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(probe.stdout)
+              imported.append(path)
+          if not imported:
+              raise SystemExit('legacy revision contained none of the integration files')
+          Path('LEGACY_OCULUS_IMPORT.json').write_text(
+              json.dumps({'revision': revision, 'imported': imported}, indent=2) + '\n'
+          )
+          PY
+      - name: Resolve the exact Oculus 1.19.2 release
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import urllib.parse
+          import urllib.request
+          from pathlib import Path
+
+          params = urllib.parse.urlencode({
+              'game_versions': json.dumps(['1.19.2']),
+              'loaders': json.dumps(['forge']),
+          })
+          request = urllib.request.Request(
+              'https://api.modrinth.com/v2/project/oculus/version?' + params,
+              headers={'User-Agent': 'cloudrumbles/voxy-forge-port-validation'},
+          )
+          versions = json.load(urllib.request.urlopen(request))
+          stable = [entry for entry in versions if entry.get('version_type') == 'release']
+          candidates = stable or versions
+          if not candidates:
+              raise SystemExit('no Forge 1.19.2 Oculus release found on Modrinth')
+          selected = candidates[0]
+          result = {
+              'id': selected['id'],
+              'version_number': selected['version_number'],
+              'name': selected['name'],
+              'files': [
+                  {
+                      'filename': item['filename'],
+                      'url': item['url'],
+                      'primary': item.get('primary', False),
+                      'hashes': item.get('hashes', {}),
+                  }
+                  for item in selected['files']
+              ],
+          }
+          Path('OCULUS_1_19_2.json').write_text(json.dumps(result, indent=2) + '\n')
+          Path('oculus-version.gradle').write_text(
+              "ext.oculus_version_id = '" + selected['id'] + "'\n"
+              "ext.oculus_version_number = '" + selected['version_number'].replace("'", "") + "'\n"
+          )
+          PY
+      - name: Enable the optional compatibility source set
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('build.gradle')
+          text = path.read_text()
+          # Stop excluding the imported compatibility classes, while retaining
+          # unrelated Nvidium and Fabric-only exclusions.
+          for line in (
+              "            exclude 'me/cortex/voxy/client/iris/**'\n",
+              "            exclude 'me/cortex/voxy/client/mixin/iris/**'\n",
+              "            exclude 'me/cortex/voxy/client/core/IrisVoxyRenderPipeline.java'\n",
+          ):
+              text = text.replace(line, '')
+          if "apply from: 'oculus-version.gradle'" not in text:
+              anchor = "apply plugin: 'org.spongepowered.mixin'\n"
+              text = text.replace(anchor, anchor + "apply from: 'oculus-version.gradle'\n")
+          if "includeGroup 'maven.modrinth'" not in text:
+              anchor = "repositories {\n    mavenCentral()\n"
+              replacement = "repositories {\n    mavenCentral()\n    exclusiveContent {\n        forRepository { maven { url = 'https://api.modrinth.com/maven' } }\n        filter { includeGroup 'maven.modrinth' }\n    }\n"
+              text = text.replace(anchor, replacement, 1)
+          dependency = "    compileOnly fg.deobf(\"maven.modrinth:oculus:${oculus_version_id}\")\n"
+          if dependency not in text:
+              anchor = "    implementation fg.deobf(\"org.embeddedt:embeddium-1.19.2:${embeddium_version}\")\n"
+              text = text.replace(anchor, anchor + dependency)
+          path.write_text(text)
+          PY
+      - name: Compile imported integration and preserve diagnostics
+        id: compile
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon clean compileJava 2>&1 | tee LEGACY_OCULUS_COMPILE.log
+      - name: Commit source and diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name cloudrumbles
+          git config user.email shahriyyah@gmail.com
+          git add build.gradle oculus-version.gradle OCULUS_1_19_2.json LEGACY_OCULUS_IMPORT.json \
+            LEGACY_OCULUS_COMPILE.log src/main/java
+          if [[ '${{ steps.compile.outcome }}' == 'success' ]]; then
+            touch LEGACY_OCULUS_COMPILE_SUCCESS
+            git add LEGACY_OCULUS_COMPILE_SUCCESS
+            message='port: import legacy Oculus shader integration'
+          else
+            message='wip: import legacy Oculus shader integration with diagnostics'
+          fi
+          git commit -m "$message"
+          git push origin HEAD:forge-1.19.2
+      - name: Require compilation
+        if: steps.compile.outcome != 'success'
+        run: exit 1
