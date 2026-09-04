@@ -1,0 +1,29 @@
+name: Export Oculus compatibility sources
+
+on:
+  push:
+    branches:
+      - forge-1.19.2-shaders
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch Oculus sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch 1.19.2 https://github.com/Asek3/Oculus.git oculus-official
+          git clone --depth 1 --branch 1.19.2 https://github.com/Teqed/Oculus.git oculus-teqed
+          rm -rf oculus-official/.git oculus-teqed/.git
+          tar -czf oculus-1.19.2-sources.tar.gz oculus-official oculus-teqed
+      - uses: actions/upload-artifact@v7
+        with:
+          name: oculus-1.19.2-sources-${{ github.sha }}
+          retention-days: 2
+          if-no-files-found: error
+          path: oculus-1.19.2-sources.tar.gz
