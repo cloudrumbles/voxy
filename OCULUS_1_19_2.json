@@ -1,0 +1,16 @@
+{
+  "id": "Mw8aFpWF",
+  "version_number": "1.19.2-1.6.9a",
+  "name": "Oculus mc1.19.2-1.6.9a",
+  "files": [
+    {
+      "filename": "oculus-mc1.19.2-1.6.9a.jar",
+      "url": "https://cdn.modrinth.com/data/GchcoXML/versions/Mw8aFpWF/oculus-mc1.19.2-1.6.9a.jar",
+      "primary": true,
+      "hashes": {
+        "sha1": "be4e14cb03ba5c931f8b73323ee8893ff5a2dd4b",
+        "sha512": "b59fad480777d0d4d9f51f9eb0d148a9a0776c76069b1e6211371c266ab3ac516d8f2c4e0bb223bce73e73c983072c700a241bde82be2cffcb9252b1db598c8a"
+      }
+    }
+  ]
+}

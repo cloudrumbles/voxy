@@ -1,14 +1,19 @@
 package me.cortex.voxy.client.iris;
 
-import com.google.gson.*;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonDeserializationContext;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonParseException;
 import com.google.gson.annotations.JsonAdapter;
 import it.unimi.dsi.fastutil.ints.Int2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectLinkedOpenHashMap;
 import me.cortex.voxy.common.Logger;
-import net.irisshaders.iris.shaderpack.ShaderPack;
-import net.irisshaders.iris.shaderpack.include.AbsolutePackPath;
+import net.coderbot.iris.shaderpack.ShaderPack;
+import net.coderbot.iris.shaderpack.include.AbsolutePackPath;
 import org.lwjgl.opengl.ARBDrawBuffersBlend;
 
 import java.io.IOException;
@@ -16,80 +21,176 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Type;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.function.Function;
-import java.util.function.IntSupplier;
 
-import static org.lwjgl.opengl.GL11.*;
-import static org.lwjgl.opengl.GL33.*;
+import static org.lwjgl.opengl.GL11.GL_BLEND;
+import static org.lwjgl.opengl.GL11.GL_DST_ALPHA;
+import static org.lwjgl.opengl.GL11.GL_DST_COLOR;
+import static org.lwjgl.opengl.GL11.GL_ONE;
+import static org.lwjgl.opengl.GL11.GL_ONE_MINUS_DST_ALPHA;
+import static org.lwjgl.opengl.GL11.GL_ONE_MINUS_DST_COLOR;
+import static org.lwjgl.opengl.GL11.GL_ONE_MINUS_SRC_ALPHA;
+import static org.lwjgl.opengl.GL11.GL_ONE_MINUS_SRC_COLOR;
+import static org.lwjgl.opengl.GL11.GL_SRC_ALPHA;
+import static org.lwjgl.opengl.GL11.GL_SRC_ALPHA_SATURATE;
+import static org.lwjgl.opengl.GL11.GL_SRC_COLOR;
+import static org.lwjgl.opengl.GL11.GL_ZERO;
+import static org.lwjgl.opengl.GL11.glBlendFuncSeparate;
+import static org.lwjgl.opengl.GL11.glDisable;
+import static org.lwjgl.opengl.GL11.glEnable;
+import static org.lwjgl.opengl.GL33.GL_ONE_MINUS_SRC1_ALPHA;
+import static org.lwjgl.opengl.GL33.GL_ONE_MINUS_SRC1_COLOR;
+import static org.lwjgl.opengl.GL33.GL_SRC1_COLOR;
+import static org.lwjgl.opengl.GL33.glDisablei;
+import static org.lwjgl.opengl.GL33.glEnablei;
 
-public class IrisShaderPatch {
-    public static final int VERSION = ((IntSupplier)()->1).getAsInt();
+/** Parsed, preprocessed Voxy shader-pack contract. */
+public final class IrisShaderPatch {
+    public static final int VERSION = 1;
     public static final int SHADER_DEFINE_VERSION = 2;
 
+    private static final Gson GSON = new GsonBuilder()
+            .excludeFieldsWithModifiers(Modifier.PRIVATE)
+            .setLenient()
+            .create();
 
-    private static final class SSBODeserializer implements JsonDeserializer<Int2ObjectOpenHashMap<String>> {
+    private final PatchData patchData;
+    private final Int2ObjectMap<String> ssbos;
+
+    private IrisShaderPatch(PatchData patchData) {
+        this.patchData = patchData;
+        this.ssbos = patchData.ssbos == null
+                ? new Int2ObjectOpenHashMap<>()
+                : patchData.ssbos;
+    }
+
+    private static final class SsboDeserializer
+            implements JsonDeserializer<Int2ObjectOpenHashMap<String>> {
         @Override
-        public Int2ObjectOpenHashMap<String> deserialize(JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
-            Int2ObjectOpenHashMap<String> ret = new Int2ObjectOpenHashMap<>();
-            if (json==null) return null;
-            try {
-                for (var entry : json.getAsJsonObject().entrySet()) {
-                    ret.put(Integer.parseInt(entry.getKey()), entry.getValue().getAsString());
-                }
-            } catch (Exception e) {
-                Logger.error(e);
+        public Int2ObjectOpenHashMap<String> deserialize(
+                JsonElement json,
+                Type typeOfT,
+                JsonDeserializationContext context) throws JsonParseException {
+            if (json == null || json.isJsonNull()) {
+                return null;
             }
-            return ret;
+
+            Int2ObjectOpenHashMap<String> result = new Int2ObjectOpenHashMap<>();
+            for (var entry : json.getAsJsonObject().entrySet()) {
+                result.put(Integer.parseInt(entry.getKey()), entry.getValue().getAsString());
+            }
+            return result;
         }
     }
-    private static final class SamplerDeserializer implements JsonDeserializer<Object2ObjectLinkedOpenHashMap<String, String>> {
+
+    private static final class SamplerDeserializer
+            implements JsonDeserializer<Object2ObjectLinkedOpenHashMap<String, String>> {
         @Override
-        public Object2ObjectLinkedOpenHashMap<String, String> deserialize(JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
-            Object2ObjectLinkedOpenHashMap<String, String> ret = new Object2ObjectLinkedOpenHashMap<>();
-            if (json==null) return null;
-            try {
-                if (json.isJsonArray()) {
-                    for (var entry : json.getAsJsonArray()) {
-                        var name = entry.getAsString();
-                        var type = "sampler2D";
-                        if (name.matches("shadowtex")) {
-                            type = "sampler2DShadow";
+        public Object2ObjectLinkedOpenHashMap<String, String> deserialize(
+                JsonElement json,
+                Type typeOfT,
+                JsonDeserializationContext context) throws JsonParseException {
+            if (json == null || json.isJsonNull()) {
+                return null;
+            }
+
+            Object2ObjectLinkedOpenHashMap<String, String> result =
+                    new Object2ObjectLinkedOpenHashMap<>();
+            if (json.isJsonArray()) {
+                for (JsonElement element : json.getAsJsonArray()) {
+                    String name = element.getAsString();
+                    result.put(name, defaultSamplerType(name));
+                }
+                return result;
+            }
+
+            for (var entry : json.getAsJsonObject().entrySet()) {
+                String type = entry.getValue().isJsonNull()
+                        ? defaultSamplerType(entry.getKey())
+                        : entry.getValue().getAsString();
+                result.put(entry.getKey(), type);
+            }
+            return result;
+        }
+
+        private static String defaultSamplerType(String name) {
+            return name.startsWith("shadowtex") ? "sampler2DShadow" : "sampler2D";
+        }
+    }
+
+    public record BlendState(int buffer, boolean off, int sourceRgb, int destinationRgb,
+                             int sourceAlpha, int destinationAlpha) {
+        private static final BlendState ALL_OFF = new BlendState(-1, true, 0, 0, 0, 0);
+    }
+
+    private static final class BlendStateDeserializer
+            implements JsonDeserializer<Int2ObjectMap<BlendState>> {
+        @Override
+        public Int2ObjectMap<BlendState> deserialize(
+                JsonElement json,
+                Type typeOfT,
+                JsonDeserializationContext context) throws JsonParseException {
+            if (json == null || json.isJsonNull()) {
+                return null;
+            }
+
+            Int2ObjectMap<BlendState> result = new Int2ObjectOpenHashMap<>();
+            if (json.isJsonPrimitive()) {
+                if (json.getAsString().equalsIgnoreCase("off")) {
+                    result.put(-1, BlendState.ALL_OFF);
+                    return result;
+                }
+                throw new JsonParseException("unknown global Voxy blend state: " + json);
+            }
+
+            for (var entry : json.getAsJsonObject().entrySet()) {
+                int buffer = Integer.parseInt(entry.getKey());
+                JsonElement value = entry.getValue();
+                if (value.isJsonPrimitive()
+                        && value.getAsString().equalsIgnoreCase("off")) {
+                    result.put(buffer, new BlendState(buffer, true, 0, 0, 0, 0));
+                    continue;
+                }
+
+                List<String> parts = new ArrayList<>(4);
+                if (value.isJsonArray()) {
+                    for (JsonElement element : value.getAsJsonArray()) {
+                        parts.add(element.getAsString());
+                    }
+                } else if (value.isJsonPrimitive()) {
+                    for (String part : value.getAsString().trim().split("\\s+")) {
+                        if (!part.isEmpty()) {
+                            parts.add(part);
                         }
-                        ret.put(name, type);
                     }
                 } else {
-                    for (var entry : json.getAsJsonObject().entrySet()) {
-                        String type = "sampler2D";
-                        if (entry.getValue().isJsonNull()) {
-                            if (entry.getKey().matches("shadowtex")) {
-                                type = "sampler2DShadow";
-                            }
-                        } else {
-                            type = entry.getValue().getAsString();
-                        }
-                        ret.put(entry.getKey(), type);
-                    }
+                    throw new JsonParseException("unknown Voxy blend state: " + value);
                 }
-            } catch (Exception e) {
-                Logger.error(e);
+
+                if (parts.size() != 4) {
+                    throw new JsonParseException(
+                            "Voxy blend state for buffer " + buffer + " requires four factors");
+                }
+                result.put(buffer, new BlendState(
+                        buffer,
+                        false,
+                        parseFactor(parts.get(0)),
+                        parseFactor(parts.get(1)),
+                        parseFactor(parts.get(2)),
+                        parseFactor(parts.get(3))));
             }
-            return ret;
+            return result;
         }
-    }
 
-    public record BlendState(int buffer, boolean off, int sRGB, int dRGB, int sA, int dA) {
-        public static BlendState ALL_OFF = new BlendState(-1, true, 0,0,0,0);
-    }
-
-
-    private static final class BlendStateDeserializer implements JsonDeserializer<Int2ObjectMap<BlendState>> {
-        private static int parseType(String type) {
-            type = type.toUpperCase();
-            if (!type.startsWith("GL_")) {
-                type = "GL_"+type;
+        private static int parseFactor(String factor) {
+            String normalized = factor.toUpperCase(Locale.ROOT);
+            if (!normalized.startsWith("GL_")) {
+                normalized = "GL_" + normalized;
             }
-            return switch (type) {
+            return switch (normalized) {
                 case "GL_ZERO" -> GL_ZERO;
                 case "GL_ONE" -> GL_ONE;
                 case "GL_SRC_COLOR" -> GL_SRC_COLOR;
@@ -104,294 +205,243 @@ public class IrisShaderPatch {
                 case "GL_SRC1_COLOR" -> GL_SRC1_COLOR;
                 case "GL_ONE_MINUS_SRC1_COLOR" -> GL_ONE_MINUS_SRC1_COLOR;
                 case "GL_ONE_MINUS_SRC1_ALPHA" -> GL_ONE_MINUS_SRC1_ALPHA;
-                default -> {
-                    Logger.error("Unknown blend option " + type);
-                    yield -1;
-                }
+                default -> throw new JsonParseException("unknown OpenGL blend factor " + factor);
             };
-        }
-        @Override
-        public Int2ObjectMap<BlendState> deserialize(JsonElement json, Type typeOfT, JsonDeserializationContext context) throws JsonParseException {
-            if (json==null) return null;
-            Int2ObjectMap<BlendState> ret = new Int2ObjectOpenHashMap<>();
-            try {
-                if (json.isJsonPrimitive()) {
-                    if (json.getAsString().equalsIgnoreCase("off")) {
-                        ret.put(-1, BlendState.ALL_OFF);
-                        return ret;
-                    }
-                } else if (json.isJsonObject()) {
-                    for (var entry : json.getAsJsonObject().entrySet()) {
-                        int buffer = Integer.parseInt(entry.getKey());
-                        BlendState state = null;
-                        var val = entry.getValue();
-                        List<String> bs = null;
-                        if (val.isJsonArray()) {
-                            bs = val.getAsJsonArray().asList().stream().map(JsonElement::getAsString).toList();
-                        } else if (val.isJsonPrimitive()) {
-                            var str = val.getAsString();
-                            if (str.equalsIgnoreCase("off")) {
-                                state = new BlendState(buffer, true, 0,0,0,0);
-                            } else {
-                                var parts = str.split(" ");
-                                if (parts.length < 4) {
-                                    state = new BlendState(buffer, true, -1, -1, -1, -1);
-                                } else {
-                                    bs = List.of(parts);
-                                }
-                            }
-                        } else {
-                            Logger.error("Unknown blend state "+val);
-                            state = null;
-                        }
-                        if (bs != null) {
-                            int[] v = bs.stream().mapToInt(BlendStateDeserializer::parseType).toArray();
-                            state = new BlendState(buffer, false, v[0], v[1], v[2], v[3]);
-                        }
-                        ret.put(buffer, state);
-                    }
-                    return ret;
-                }
-            } catch (Exception e) {
-                Logger.error(e);
-            }
-            Logger.error("Failed to parse blend state: " + json);
-            return ret;
         }
     }
 
-    private static class PatchGson {
-        public int version;//TODO maybe replace with semver?
-        public int[] opaqueDrawBuffers;
-        public int[] translucentDrawBuffers;
-        public String[] uniforms;
+    private static final class PatchData {
+        int version;
+        int[] opaqueDrawBuffers;
+        int[] translucentDrawBuffers;
+        String[] uniforms;
         @JsonAdapter(SamplerDeserializer.class)
-        public Object2ObjectLinkedOpenHashMap<String, String> samplers;
-        public String opaquePatchData;
-        public String translucentPatchData;
-        @JsonAdapter(SSBODeserializer.class)
-        public Int2ObjectOpenHashMap<String> ssbos;
+        Object2ObjectLinkedOpenHashMap<String, String> samplers;
+        String opaquePatchData;
+        String translucentPatchData;
+        @JsonAdapter(SsboDeserializer.class)
+        Int2ObjectOpenHashMap<String> ssbos;
         @JsonAdapter(BlendStateDeserializer.class)
-        public Int2ObjectOpenHashMap<BlendState> blending;
-        public String taaOffset;
-        public boolean excludeLodsFromVanillaDepth;
-        public float[] renderScale;
-        public boolean useViewportDims;
-        public boolean skipShaderDepthHackFix;
-        //public boolean deferTranslucentRendering;
-        public String checkValid() {
-            if (this.blending != null) {
-                int i = 0;
-                for (BlendState state : this.blending.values()) {
-                    if (state.buffer != -1 && (state.buffer<0||this.translucentDrawBuffers.length<=state.buffer)) {
-                        if (state.buffer<0) {
-                            return "Blending buffer is <0 at index: " + i;
-                        } else {
-                            return "Blending buffer index out of bounds at "+i+" was "+state.buffer+" maximum is " +(this.translucentDrawBuffers.length-1);
-                        }
+        Int2ObjectOpenHashMap<BlendState> blending;
+        String taaOffset;
+        boolean excludeLodsFromVanillaDepth;
+        float[] renderScale;
+        boolean useViewportDims;
+        boolean skipShaderDepthHackFix;
+
+        String validate() {
+            if (version != VERSION) {
+                return "unsupported Voxy patch version " + version + "; expected " + VERSION;
+            }
+            if (opaquePatchData == null || opaquePatchData.isBlank()) {
+                return "opaquePatchData is missing";
+            }
+            if (uniforms == null) {
+                return "uniforms is missing";
+            }
+            if (opaqueDrawBuffers == null || opaqueDrawBuffers.length == 0) {
+                return "opaqueDrawBuffers is missing";
+            }
+            if (translucentDrawBuffers == null || translucentDrawBuffers.length == 0) {
+                return "translucentDrawBuffers is missing";
+            }
+            if (blending != null) {
+                for (BlendState state : blending.values()) {
+                    if (state == null) {
+                        return "blending contains a null state";
                     }
-                    i++;
+                    if (state.buffer != -1
+                            && (state.buffer < 0 || state.buffer >= translucentDrawBuffers.length)) {
+                        return "blend target " + state.buffer
+                                + " is outside translucentDrawBuffers["
+                                + translucentDrawBuffers.length + "]";
+                    }
                 }
-            }
-            if (this.opaquePatchData == null) {
-                return "Opaque patch data is null";
-            }
-            if (this.uniforms == null) {
-                return "Uniforms are null";
-            }
-            if (this.opaqueDrawBuffers == null) {
-                return "Opaque draw buffers are null";
-            }
-            if (this.translucentDrawBuffers == null) {
-                return "Translucent draw buffers are null";
             }
             return null;
         }
     }
 
-
-
-    private final PatchGson patchData;
-    private final ShaderPack pack;
-    private final Int2ObjectMap<String> ssbos;
-    private IrisShaderPatch(PatchGson patchData, ShaderPack pack) {
-        this.patchData = patchData;
-        this.pack = pack;
-
-        if (patchData.ssbos == null) {
-            this.ssbos = new Int2ObjectOpenHashMap<>();
-        } else {
-            this.ssbos = patchData.ssbos;
-        }
-    }
-
     public boolean useViewportDims() {
-        return this.patchData.useViewportDims;
+        return patchData.useViewportDims;
     }
 
-    public boolean skipShaderDepthHackFix() { return this.patchData.skipShaderDepthHackFix; }
+    public boolean skipShaderDepthHackFix() {
+        return patchData.skipShaderDepthHackFix;
+    }
+
     public Int2ObjectMap<String> getSSBOs() {
-        return new Int2ObjectLinkedOpenHashMap<>(this.ssbos);
+        return new Int2ObjectLinkedOpenHashMap<>(ssbos);
     }
+
     public String getPatchOpaqueSource() {
-        return this.patchData.opaquePatchData;
+        return patchData.opaquePatchData;
     }
+
     public String getPatchTranslucentSource() {
-        return this.patchData.translucentPatchData;
+        return patchData.translucentPatchData;
     }
+
     public String getTAAShift() {
-        return this.patchData.taaOffset;// == null?"{return vec2(0.0);}":this.patchData.taaOffset;
+        return patchData.taaOffset;
     }
+
     public String[] getUniformList() {
-        return this.patchData.uniforms;
+        return patchData.uniforms.clone();
     }
+
     public Object2ObjectLinkedOpenHashMap<String, String> getSamplerSet() {
-        return this.patchData.samplers;
+        return patchData.samplers == null
+                ? null
+                : new Object2ObjectLinkedOpenHashMap<>(patchData.samplers);
     }
 
+    public int[] getOpaqueTargets() {
+        return patchData.opaqueDrawBuffers.clone();
+    }
 
+    /** Kept for source compatibility with the selected Voxy baseline. */
     public int[] getOpqaueTargets() {
-        return this.patchData.opaqueDrawBuffers;
+        return getOpaqueTargets();
     }
 
     public int[] getTranslucentTargets() {
-        return this.patchData.translucentDrawBuffers;
+        return patchData.translucentDrawBuffers.clone();
     }
 
     public boolean emitToVanillaDepth() {
-        return !this.patchData.excludeLodsFromVanillaDepth;
+        return !patchData.excludeLodsFromVanillaDepth;
     }
 
     public float[] getRenderScale() {
-        if (this.patchData.renderScale == null || this.patchData.renderScale.length==0) {
-            return new float[]{1,1};
+        if (patchData.renderScale == null || patchData.renderScale.length == 0) {
+            return new float[]{1.0f, 1.0f};
         }
-        if (this.patchData.renderScale.length == 1) {
-            return new float[]{this.patchData.renderScale[0],this.patchData.renderScale[0]};
+        if (patchData.renderScale.length == 1) {
+            float scale = Math.max(0.01f, patchData.renderScale[0]);
+            return new float[]{scale, scale};
         }
-        return new float[]{Math.max(0.01f,this.patchData.renderScale[0]),Math.max(0.01f,this.patchData.renderScale[1])};
+        return new float[]{
+                Math.max(0.01f, patchData.renderScale[0]),
+                Math.max(0.01f, patchData.renderScale[1])};
     }
 
     public boolean deferedTranslucentRendering() {
-        return false;//this.patchData.deferTranslucentRendering;
+        return false;
     }
 
     public Runnable createBlendSetup() {
-        if (this.patchData.blending == null || this.patchData.blending.isEmpty()) {
-            return ()->{};//No blending change
+        if (patchData.blending == null || patchData.blending.isEmpty()) {
+            return () -> { };
         }
-        return ()->{
-            final var BS = this.patchData.blending;
-            //Set inital state
-            var init = BS.getOrDefault(-1, null);
-            if (init != null) {
-                if (init.off) {
+        return () -> {
+            BlendState global = patchData.blending.get(-1);
+            if (global != null) {
+                if (global.off) {
                     glDisable(GL_BLEND);
                 } else {
                     glEnable(GL_BLEND);
-                    glBlendFuncSeparate(init.sRGB, init.dRGB, init.sA, init.dA);
+                    glBlendFuncSeparate(global.sourceRgb, global.destinationRgb,
+                            global.sourceAlpha, global.destinationAlpha);
                 }
             }
-            for (var entry:BS.int2ObjectEntrySet()) {
-                if (entry.getIntKey() == -1) continue;
-                final var s = entry.getValue();
-                if (s.off) {
-                    glDisablei(GL_BLEND, s.buffer);
+
+            for (var entry : patchData.blending.int2ObjectEntrySet()) {
+                if (entry.getIntKey() == -1) {
+                    continue;
+                }
+                BlendState state = entry.getValue();
+                if (state.off) {
+                    glDisablei(GL_BLEND, state.buffer);
                 } else {
-                    glEnablei(GL_BLEND, s.buffer);
-                    //_sigh_ thanks nvidia
-                    ARBDrawBuffersBlend.glBlendFuncSeparateiARB(s.buffer, s.sRGB, s.dRGB, s.sA, s.dA);
+                    glEnablei(GL_BLEND, state.buffer);
+                    ARBDrawBuffersBlend.glBlendFuncSeparateiARB(
+                            state.buffer,
+                            state.sourceRgb,
+                            state.destinationRgb,
+                            state.sourceAlpha,
+                            state.destinationAlpha);
                 }
             }
         };
     }
 
-    private static final Gson GSON = new GsonBuilder()
-            .excludeFieldsWithModifiers(Modifier.PRIVATE)
-            .setLenient()
-            .create();
-
-    public static IrisShaderPatch makePatch(ShaderPack ipack, AbsolutePackPath directory, Function<AbsolutePackPath, String> sourceProvider) {
-        String voxyPatchData = sourceProvider.apply(directory.resolve("voxy.json"));
-        if (voxyPatchData == null) {//No voxy patch data in shaderpack
+    public static IrisShaderPatch makePatch(
+            ShaderPack ignoredPack,
+            AbsolutePackPath directory,
+            Function<AbsolutePackPath, String> sourceProvider) {
+        String json = sourceProvider.apply(directory.resolve("voxy.json"));
+        if (json == null || json.isBlank()) {
             return null;
         }
+        return parse(
+                json,
+                sourceProvider.apply(directory.resolve("voxy_opaque.glsl")),
+                sourceProvider.apply(directory.resolve("voxy_translucent.glsl")),
+                sourceProvider.apply(directory.resolve("voxy_taa.glsl")));
+    }
 
-        //A more graceful exit on blank string
-        if (voxyPatchData.isBlank()) {
-            return null;
-        }
+    static IrisShaderPatch parseForTest(String preprocessedJson, String opaquePatch) {
+        return parse(preprocessedJson, opaquePatch, null, null);
+    }
 
-        //Escape things
-        voxyPatchData = voxyPatchData.replace("\\", "\\\\");
-
-        PatchGson patchData = null;
+    private static IrisShaderPatch parse(
+            String preprocessedJson,
+            String externalOpaque,
+            String externalTranslucent,
+            String externalTaa) {
+        String normalized = normalizePreprocessedJson(preprocessedJson);
         try {
-            //TODO: basicly find any "commented out" quotation marks and escape them (if the line, when stripped starts with a // or /* then escape all quotation marks in that line)
-            {
-                StringBuilder builder = new StringBuilder(voxyPatchData.length());
-                //Rebuild the patch, replacing commented out " with \"
-                for (var line : voxyPatchData.split("\n")) {
-                    int idx = line.indexOf("//");
-                    if (idx != -1) {
-                        builder.append(line, 0, idx);
-                        builder.append(line.substring(idx).replace("\"","\\\""));
-                    } else {
-                        builder.append(line);
-                    }
-                    builder.append("\n");
-                }
-                voxyPatchData = builder.toString();
+            PatchData data = GSON.fromJson(normalized, PatchData.class);
+            if (data == null) {
+                throw new JsonParseException("Voxy patch parsed to null");
             }
 
-            //Stupid chunk fade in patch (should probably just breaks
-            voxyPatchData = voxyPatchData.replaceAll("void _cfi_ignoreMarker\\(\\) \\{\\}", "");
-
-            patchData = GSON.fromJson(voxyPatchData, PatchGson.class);
-            if (patchData == null) {
-                throw new IllegalStateException("Voxy patch json returned null, this is most likely due to malformed json file");
+            if (externalOpaque != null && !externalOpaque.isBlank()) {
+                Logger.info("External opaque Voxy shader patch applied");
+                data.opaquePatchData = externalOpaque;
+            }
+            if (externalTranslucent != null && !externalTranslucent.isBlank()) {
+                Logger.info("External translucent Voxy shader patch applied");
+                data.translucentPatchData = externalTranslucent;
+            }
+            if (externalTaa != null && !externalTaa.isBlank()) {
+                Logger.info("External Voxy TAA patch applied");
+                data.taaOffset = externalTaa;
             }
 
-            {//Inject data from the auxilery files if they are present
-                var opaque = sourceProvider.apply(directory.resolve("voxy_opaque.glsl"));
-                if (opaque != null) {
-                    Logger.info("External opaque shader patch applied");
-                    patchData.opaquePatchData = opaque;
-                }
-                var translucent = sourceProvider.apply(directory.resolve("voxy_translucent.glsl"));
-                if (translucent != null) {
-                    Logger.info("External translucent shader patch applied");
-                    patchData.translucentPatchData = translucent;
-                }
-                //This might be ok? not.. sure if is nice or not
-                var taa = sourceProvider.apply(directory.resolve("voxy_taa.glsl"));
-                if (taa != null) {
-                    Logger.info("External taa shader patch applied");
-                    patchData.taaOffset = taa;
-                }
+            String invalidReason = data.validate();
+            if (invalidReason != null) {
+                throw new JsonParseException(invalidReason);
             }
-
-            var invalidPatchDataReason = patchData.checkValid();
-            if (invalidPatchDataReason!=null) {
-                throw new IllegalStateException("voxy json patch not valid: " + invalidPatchDataReason);
-            }
-        } catch (Exception e) {
-            patchData = null;
-            Logger.error("Failed to parse patch data gson, dumping json",e);
+            return new IrisShaderPatch(data);
+        } catch (RuntimeException exception) {
+            Logger.error("Failed to parse preprocessed Voxy shader-pack metadata", exception);
             try {
-                Files.writeString(Path.of("JSON_DUMP.txt"), voxyPatchData);
-            } catch (IOException j) {
-                throw new RuntimeException(j);
+                Files.writeString(Path.of("voxy-shader-patch-failure.json"), normalized);
+            } catch (IOException dumpFailure) {
+                exception.addSuppressed(dumpFailure);
             }
-            throw new ShaderLoadError("Failed to parse patch data gson, dumping json",e);
+            throw new ShaderLoadError("Failed to parse Voxy shader-pack metadata", exception);
         }
-        if (patchData == null) {
-            return null;
+    }
+
+    private static String normalizePreprocessedJson(String source) {
+        // Oculus runs voxy.json through the same C preprocessor as GLSL. Escape
+        // backslashes and quotation marks inside // comments so Gson's lenient
+        // parser cannot mistake shader comments for JSON string delimiters.
+        String escaped = source.replace("\\", "\\\\");
+        StringBuilder builder = new StringBuilder(escaped.length());
+        for (String line : escaped.split("\\n", -1)) {
+            int comment = line.indexOf("//");
+            if (comment >= 0) {
+                builder.append(line, 0, comment)
+                        .append(line.substring(comment).replace("\"", "\\\""));
+            } else {
+                builder.append(line);
+            }
+            builder.append('\n');
         }
-        if (patchData.version != VERSION) {
-            Logger.error("Shader has voxy patch data, but patch version is incorrect. expected " + VERSION + " got "+patchData.version);
-            throw new IllegalStateException("Shader version mismatch expected " + VERSION + " got "+patchData.version);
-        }
-        return new IrisShaderPatch(patchData, ipack);
+        return builder.toString().replaceAll("void _cfi_ignoreMarker\\(\\) \\{\\}", "");
     }
 }
