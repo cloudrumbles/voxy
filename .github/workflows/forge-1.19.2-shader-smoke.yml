@@ -21,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: forge-1.19.2-shader-${{ matrix.pack }}-${{ github.ref }}
+  group: forge-1.19.2-shader-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,8 +40,6 @@ jobs:
             folder: ComplementaryReimagined-Voxy
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    env:
-      MESA_GLSL_VERSION_OVERRIDE: '460'
 
     steps:
       - name: Check out Voxy
@@ -84,6 +82,7 @@ jobs:
       - name: Run installed client with shader pack
         shell: bash
         env:
+          MESA_GLSL_VERSION_OVERRIDE: '460'
           VOXY_SMOKE_SHADER_PACK_DIR: ${{ github.workspace }}/ci/runtime-shader
           VOXY_SMOKE_SHADER_PACK_NAME: ${{ matrix.folder }}
           JAVA_TOOL_OPTIONS: >-
