@@ -1,0 +1,49 @@
+name: Apply Oculus adapter compile fixes
+
+on:
+  push:
+    branches:
+      - forge-1.19.2-shaders
+    paths:
+      - '.github/workflows/apply-shader-compile-fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: forge-1.19.2-shaders
+      - name: Apply adapter fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+
+          shader_patch = root / 'src/main/java/me/cortex/voxy/client/iris/IrisShaderPatch.java'
+          text = shader_patch.read_text()
+          text = text.replace('import static org.lwjgl.opengl.GL11.glBlendFuncSeparate;\n',
+                              'import static org.lwjgl.opengl.GL14.glBlendFuncSeparate;\n')
+          shader_patch.write_text(text)
+
+          mixin = root / 'src/main/java/me/cortex/voxy/client/mixin/iris/MixinLevelRenderer.java'
+          mixin.write_text('''package me.cortex.voxy.client.mixin.iris;\n\nimport com.mojang.blaze3d.vertex.PoseStack;\nimport com.mojang.math.Matrix4f;\nimport me.cortex.voxy.client.core.util.IrisUtil;\nimport me.jellysquid.mods.sodium.client.render.chunk.ChunkRenderMatrices;\nimport net.minecraft.client.Camera;\nimport net.minecraft.client.Minecraft;\nimport net.minecraft.client.renderer.GameRenderer;\nimport net.minecraft.client.renderer.LevelRenderer;\nimport net.minecraft.client.renderer.LightTexture;\nimport org.lwjgl.system.MemoryStack;\nimport org.spongepowered.asm.mixin.Mixin;\nimport org.spongepowered.asm.mixin.Unique;\nimport org.spongepowered.asm.mixin.injection.At;\nimport org.spongepowered.asm.mixin.injection.Inject;\nimport org.spongepowered.asm.mixin.injection.callback.CallbackInfo;\n\nimport java.nio.FloatBuffer;\n\nimport static org.lwjgl.opengl.GL11C.glViewport;\n\n@Mixin(LevelRenderer.class)\npublic class MixinLevelRenderer {\n    @Inject(method = "renderLevel", at = @At("HEAD"))\n    private void voxy$captureShaderViewport(\n            PoseStack matrices,\n            float tickDelta,\n            long finishTimeNano,\n            boolean renderBlockOutline,\n            Camera camera,\n            GameRenderer gameRenderer,\n            LightTexture lightTexture,\n            Matrix4f projectionMatrix,\n            CallbackInfo callbackInfo) {\n        if (!IrisUtil.irisShaderPackEnabled()) {\n            IrisUtil.CAPTURED_VIEWPORT_PARAMETERS = null;\n            return;\n        }\n\n        var target = Minecraft.getInstance().getMainRenderTarget();\n        glViewport(0, 0, target.width, target.height);\n        var position = camera.getPosition();\n        IrisUtil.CAPTURED_VIEWPORT_PARAMETERS = new IrisUtil.CapturedViewportParameters(\n                new ChunkRenderMatrices(\n                        voxy$toJoml(projectionMatrix),\n                        voxy$toJoml(matrices.last().pose())),\n                position.x,\n                position.y,\n                position.z);\n    }\n\n    @Unique\n    private static org.joml.Matrix4f voxy$toJoml(Matrix4f source) {\n        try (MemoryStack stack = MemoryStack.stackPush()) {\n            FloatBuffer values = stack.mallocFloat(16);\n            source.store(values);\n            return new org.joml.Matrix4f(values);\n        }\n    }\n}\n''')
+
+          accessor = root / 'src/main/java/me/cortex/voxy/client/mixin/iris/ShaderStorageBufferHolderAccessor.java'
+          accessor.write_text('''package me.cortex.voxy.client.mixin.iris;\n\nimport net.coderbot.iris.gl.buffer.ShaderStorageBuffer;\nimport net.coderbot.iris.gl.buffer.ShaderStorageBufferHolder;\nimport org.spongepowered.asm.mixin.Mixin;\nimport org.spongepowered.asm.mixin.gen.Accessor;\n\n@Mixin(value = ShaderStorageBufferHolder.class, remap = false)\npublic interface ShaderStorageBufferHolderAccessor {\n    @Accessor("buffers")\n    ShaderStorageBuffer[] voxy$getBuffers();\n}\n''')
+
+          factory = root / 'src/main/java/me/cortex/voxy/client/iris/OculusRenderPipelineFactory.java'
+          factory.write_text('''package me.cortex.voxy.client.iris;\n\nimport me.cortex.voxy.client.core.AbstractRenderPipeline;\nimport me.cortex.voxy.client.core.IrisVoxyRenderPipeline;\nimport me.cortex.voxy.client.core.rendering.hierachical.AsyncNodeManager;\nimport me.cortex.voxy.client.core.rendering.hierachical.HierarchicalOcclusionTraverser;\nimport me.cortex.voxy.client.core.rendering.hierachical.NodeCleaner;\nimport net.coderbot.iris.Iris;\nimport net.coderbot.iris.pipeline.newshader.NewWorldRenderingPipeline;\n\nimport java.util.function.BooleanSupplier;\n\n/** Creates Voxy's shader-aware pipeline from the active Oculus world pipeline. */\npublic final class OculusRenderPipelineFactory {\n    private OculusRenderPipelineFactory() {\n    }\n\n    public static AbstractRenderPipeline create(\n            AsyncNodeManager nodeManager,\n            NodeCleaner nodeCleaner,\n            HierarchicalOcclusionTraverser traversal,\n            BooleanSupplier frexSupplier) {\n        var pipeline = Iris.getPipelineManager().getPipelineNullable();\n        if (!(pipeline instanceof NewWorldRenderingPipeline)) {\n            throw new ShaderLoadError("Oculus reports shaders enabled without an active shader pipeline");\n        }\n        if (!(pipeline instanceof IGetIrisVoxyPipelineData dataAccess)) {\n            throw new ShaderLoadError("The active Oculus pipeline does not expose Voxy bridge data");\n        }\n\n        IrisVoxyRenderPipelineData data = dataAccess.voxy$getPipelineData();\n        if (data == null) {\n            throw new ShaderLoadError("The selected shader pack does not provide a Voxy shader program");\n        }\n\n        return new IrisVoxyRenderPipeline(data, nodeManager, nodeCleaner, traversal, frexSupplier);\n    }\n}\n''')
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/main/java/me/cortex/voxy/client
+          git commit -m 'fix: complete Oculus 1.19.2 adapter compile bridge [skip ci]'
+          git push origin HEAD:forge-1.19.2-shaders
