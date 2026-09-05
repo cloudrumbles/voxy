@@ -1,3 +1,4 @@
+# Validates the final packaged Voxy jar with real Voxy-aware shader packs.
 name: Forge 1.19.2 Oculus shader validation
 
 on:
