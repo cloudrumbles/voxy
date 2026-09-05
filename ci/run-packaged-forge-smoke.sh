@@ -10,6 +10,17 @@ SERVER_PROJECT_DIR="$ROOT_DIR/build/packaged-smoke-server-project"
 CLIENT_RUN_DIR="$ROOT_DIR/run-packaged-client"
 SERVER_RUN_DIR="$ROOT_DIR/run-packaged-server"
 
+SHADER_PACK_DIR="${VOXY_SMOKE_SHADER_PACK_DIR:-}"
+SHADER_PACK_NAME="${VOXY_SMOKE_SHADER_PACK_NAME:-}"
+SHADER_MODE=false
+if [[ -n "$SHADER_PACK_DIR" || -n "$SHADER_PACK_NAME" ]]; then
+    if [[ -z "$SHADER_PACK_DIR" || -z "$SHADER_PACK_NAME" ]]; then
+        echo "both VOXY_SMOKE_SHADER_PACK_DIR and VOXY_SMOKE_SHADER_PACK_NAME are required" >&2
+        exit 2
+    fi
+    SHADER_MODE=true
+fi
+
 rm -rf \
     "$REPORT_DIR" \
     "$CLIENT_PROJECT_DIR" \
@@ -21,6 +32,30 @@ mkdir -p \
     "$CLIENT_PROJECT_DIR/libs" \
     "$SERVER_PROJECT_DIR" \
     "$CLIENT_RUN_DIR"
+
+if [[ "$SHADER_MODE" == true ]]; then
+    if [[ ! -d "$SHADER_PACK_DIR/shaders" ]]; then
+        echo "shader pack checkout must contain a shaders directory: $SHADER_PACK_DIR" >&2
+        exit 2
+    fi
+    oculus_jar="$(find "$HOME/.gradle/caches/modules-2/files-2.1/maven.modrinth/GchcoXML/Mw8aFpWF" -type f -name '*.jar' -print -quit 2>/dev/null || true)"
+    if [[ -z "$oculus_jar" || ! -f "$oculus_jar" ]]; then
+        echo "Oculus 1.6.9a compile artifact was not resolved by the main build" >&2
+        exit 2
+    fi
+    cp "$oculus_jar" "$CLIENT_PROJECT_DIR/libs/oculus-smoke-1.6.9a.jar"
+    mkdir -p "$CLIENT_RUN_DIR/shaderpacks" "$CLIENT_RUN_DIR/config"
+    rm -rf "$CLIENT_RUN_DIR/shaderpacks/$SHADER_PACK_NAME"
+    cp -a "$SHADER_PACK_DIR" "$CLIENT_RUN_DIR/shaderpacks/$SHADER_PACK_NAME"
+    cat > "$CLIENT_RUN_DIR/config/oculus.properties" <<OCULUS
+shaderPack=$SHADER_PACK_NAME
+enableShaders=true
+enableDebugOptions=false
+disableUpdateMessage=true
+maxShadowRenderDistance=32
+colorSpace=SRGB
+OCULUS
+fi
 
 mapfile -t voxy_jars < <(find "$ROOT_DIR/build/libs" -maxdepth 1 -type f -name '*-all.jar' -print | sort)
 if [[ "${#voxy_jars[@]}" -ne 1 ]]; then
@@ -98,6 +133,7 @@ group = 'me.cortex.voxy.smoke'
 def smokePhase = providers.gradleProperty('smokePhase').orElse('title').get()
 def smokeRunDir = file(providers.gradleProperty('smokeRunDir').orElse('run-client').get())
 def isWorldPhase = smokePhase.startsWith('world-')
+def useOculus = providers.gradleProperty('useOculus').orElse('false').get().toBoolean()
 
 minecraft {
     mappings channel: 'official', version: '1.19.2'
@@ -126,6 +162,9 @@ repositories {
 dependencies {
     minecraft 'net.minecraftforge:forge:1.19.2-43.5.2'
     implementation fg.deobf('local.voxy:voxy-smoke:0.2.14')
+    if (useOculus) {
+        implementation fg.deobf('local.oculus:oculus-smoke:1.6.9a')
+    }
     implementation(fg.deobf('org.embeddedt:embeddium-1.19.2:0.3.32-beta.90+mc1.19.2')) {
         transitive = false
     }
@@ -377,6 +416,7 @@ run_packaged_client() {
                 runClient \
                 -PsmokeRunDir="$CLIENT_RUN_DIR" \
                 -PsmokePhase="$phase" \
+                -PuseOculus="$SHADER_MODE" \
                 > "$REPORT_DIR/${name}.log" 2>&1
     local status=$?
     set -e
@@ -389,6 +429,18 @@ run_packaged_client() {
 
     reject_runtime_failures "$REPORT_DIR/${name}.log"
     validate_result "$result" "$phase"
+    if [[ "$SHADER_MODE" == true ]]; then
+        if grep -Eqi 'Failed to create shader rendering pipeline|Shader compilation failed|Failed to parse preprocessed Voxy shader-pack metadata|Voxy shader requests missing Oculus' "$REPORT_DIR/${name}.log"; then
+            echo "shader pipeline failure detected for $SHADER_PACK_NAME" >&2
+            grep -Ein 'Failed to create shader rendering pipeline|Shader compilation failed|Failed to parse preprocessed Voxy shader-pack metadata|Voxy shader requests missing Oculus' "$REPORT_DIR/${name}.log" | tail -n 80 >&2 || true
+            return 1
+        fi
+        grep -Fq "Using shaderpack: $SHADER_PACK_NAME" "$REPORT_DIR/${name}.log"
+        grep -Fq 'External opaque Voxy shader patch applied' "$REPORT_DIR/${name}.log"
+        if [[ "$phase" == world-* ]]; then
+            grep -Fq "using pipeline 'IrisVoxyRenderPipeline'" "$REPORT_DIR/${name}.log"
+        fi
+    fi
     cp "$result" "$REPORT_DIR/${name}.json"
 }
 
