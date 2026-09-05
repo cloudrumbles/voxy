@@ -1,0 +1,29 @@
+name: Export current shader branch
+
+on:
+  push:
+    branches:
+      - forge-1.19.2-shaders
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=build --exclude=run --exclude=.gradle -czf "$RUNNER_TEMP/voxy-shader-current.tar.gz" .
+          cp "$RUNNER_TEMP/voxy-shader-current.tar.gz" .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: voxy-shader-current-${{ github.sha }}
+          retention-days: 2
+          path: voxy-shader-current.tar.gz
