@@ -1,0 +1,64 @@
+name: Apply packaged Oculus shader runtime matrix
+
+on:
+  push:
+    branches:
+      - forge-1.19.2-shaders
+    paths:
+      - '.github/workflows/apply-shader-runtime-matrix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: forge-1.19.2-shaders
+      - name: Add optional Oculus mode and shader matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('ci/run-packaged-forge-smoke.sh')
+          text = path.read_text()
+
+          marker = 'SERVER_RUN_DIR="$ROOT_DIR/run-packaged-server"\n'
+          insert = marker + '''\nSHADER_PACK_DIR="${VOXY_SMOKE_SHADER_PACK_DIR:-}"\nSHADER_PACK_NAME="${VOXY_SMOKE_SHADER_PACK_NAME:-}"\nSHADER_MODE=false\nif [[ -n "$SHADER_PACK_DIR" || -n "$SHADER_PACK_NAME" ]]; then\n    if [[ -z "$SHADER_PACK_DIR" || -z "$SHADER_PACK_NAME" ]]; then\n        echo "both VOXY_SMOKE_SHADER_PACK_DIR and VOXY_SMOKE_SHADER_PACK_NAME are required" >&2\n        exit 2\n    fi\n    SHADER_MODE=true\nfi\n'''
+          if 'SHADER_PACK_DIR="${VOXY_SMOKE_SHADER_PACK_DIR:-}"' not in text:
+              text = text.replace(marker, insert)
+
+          mkdir_marker = '    "$CLIENT_RUN_DIR"\n\nmapfile -t voxy_jars'
+          setup = '''    "$CLIENT_RUN_DIR"\n\nif [[ "$SHADER_MODE" == true ]]; then\n    if [[ ! -d "$SHADER_PACK_DIR/shaders" ]]; then\n        echo "shader pack checkout must contain a shaders directory: $SHADER_PACK_DIR" >&2\n        exit 2\n    fi\n    oculus_jar="$(find "$HOME/.gradle/caches/modules-2/files-2.1/maven.modrinth/GchcoXML/Mw8aFpWF" -type f -name '*.jar' -print -quit 2>/dev/null || true)"\n    if [[ -z "$oculus_jar" || ! -f "$oculus_jar" ]]; then\n        echo "Oculus 1.6.9a compile artifact was not resolved by the main build" >&2\n        exit 2\n    fi\n    cp "$oculus_jar" "$CLIENT_PROJECT_DIR/libs/oculus-smoke-1.6.9a.jar"\n    mkdir -p "$CLIENT_RUN_DIR/shaderpacks" "$CLIENT_RUN_DIR/config"\n    cp -a "$SHADER_PACK_DIR" "$CLIENT_RUN_DIR/shaderpacks/$SHADER_PACK_NAME"\n    cat > "$CLIENT_RUN_DIR/config/oculus.properties" <<OCULUS\nshaderPack=$SHADER_PACK_NAME\nenableShaders=true\nenableDebugOptions=false\ndisableUpdateMessage=true\nmaxShadowRenderDistance=32\ncolorSpace=SRGB\nOCULUS\nfi\n\nmapfile -t voxy_jars'''
+          if 'Oculus 1.6.9a compile artifact was not resolved' not in text:
+              text = text.replace(mkdir_marker, setup)
+
+          text = text.replace(
+              "def isWorldPhase = smokePhase.startsWith('world-')\n",
+              "def isWorldPhase = smokePhase.startsWith('world-')\ndef useOculus = providers.gradleProperty('useOculus').orElse('false').get().toBoolean()\n")
+          text = text.replace(
+              "    implementation fg.deobf('local.voxy:voxy-smoke:0.2.14')\n",
+              "    implementation fg.deobf('local.voxy:voxy-smoke:0.2.14')\n    if (useOculus) {\n        implementation fg.deobf('local.oculus:oculus-smoke:1.6.9a')\n    }\n")
+          text = text.replace(
+              '                -PsmokePhase="$phase" \\\n',
+              '                -PsmokePhase="$phase" \\\n                -PuseOculus="$SHADER_MODE" \\\n')
+
+          validate_marker = '    validate_result "$result" "$phase"\n    cp "$result" "$REPORT_DIR/${name}.json"\n'
+          validate_replace = '''    validate_result "$result" "$phase"\n    if [[ "$SHADER_MODE" == true ]]; then\n        if grep -Eqi 'Failed to create shader rendering pipeline|Shader compilation failed|Failed to parse preprocessed Voxy shader-pack metadata|Voxy shader requests missing Oculus' "$REPORT_DIR/${name}.log"; then\n            echo "shader pipeline failure detected for $SHADER_PACK_NAME" >&2\n            grep -Ein 'Failed to create shader rendering pipeline|Shader compilation failed|Failed to parse preprocessed Voxy shader-pack metadata|Voxy shader requests missing Oculus' "$REPORT_DIR/${name}.log" | tail -n 80 >&2 || true\n            return 1\n        fi\n        grep -Fq "Using shaderpack: $SHADER_PACK_NAME" "$REPORT_DIR/${name}.log"\n        grep -Fq 'External opaque Voxy shader patch applied' "$REPORT_DIR/${name}.log"\n        if [[ "$phase" == world-* ]]; then\n            grep -Fq "using pipeline 'IrisVoxyRenderPipeline'" "$REPORT_DIR/${name}.log"\n        fi\n    fi\n    cp "$result" "$REPORT_DIR/${name}.json"\n'''
+          if "using pipeline 'IrisVoxyRenderPipeline'" not in text:
+              text = text.replace(validate_marker, validate_replace)
+
+          path.write_text(text)
+
+          Path('.github/workflows/forge-1.19.2-shader-smoke.yml').write_text('''name: Forge 1.19.2 Oculus shader validation\n\non:\n  push:\n    branches:\n      - forge-1.19.2-shaders\n    paths:\n      - 'build.gradle'\n      - 'gradle.properties'\n      - 'src/**'\n      - 'ci/run-packaged-forge-smoke.sh'\n      - 'ci/validate-packaged-jar.py'\n      - '.github/workflows/forge-1.19.2-shader-smoke.yml'\n  pull_request:\n    branches:\n      - forge-1.19.2\n  workflow_dispatch:\n\npermissions:\n  contents: read\n\nconcurrency:\n  group: forge-1.19.2-shader-${{ matrix.pack }}-${{ github.ref }}\n  cancel-in-progress: true\n\njobs:\n  shader-pack:\n    strategy:\n      fail-fast: false\n      matrix:\n        include:\n          - pack: photon\n            repository: sixthsurge/photon\n            ref: 15458c0937f8647c37eb6a501bef5eb3bf3da31b\n            folder: Photon-Voxy\n          - pack: complementary-reimagined\n            repository: ComplementaryDevelopment/ComplementaryReimagined\n            ref: 7c784f3a3bfe5a997f1393ea036e4e2d9789f1be\n            folder: ComplementaryReimagined-Voxy\n    runs-on: ubuntu-24.04\n    timeout-minutes: 90\n    env:\n      MESA_GLSL_VERSION_OVERRIDE: '460'\n\n    steps:\n      - name: Check out Voxy\n        uses: actions/checkout@v7\n        with:\n          persist-credentials: false\n\n      - name: Check out shader pack\n        uses: actions/checkout@v7\n        with:\n          repository: ${{ matrix.repository }}\n          ref: ${{ matrix.ref }}\n          path: ci/runtime-shader\n          persist-credentials: false\n\n      - name: Set up Java 17\n        uses: actions/setup-java@v6\n        with:\n          distribution: temurin\n          java-version: 17\n\n      - name: Set up Gradle\n        uses: gradle/actions/setup-gradle@v6\n\n      - name: Install software OpenGL\n        shell: bash\n        run: |\n          sudo apt-get update -qq\n          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \\\n            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0 flite1-dev\n\n      - name: Build production artifact\n        shell: bash\n        run: |\n          set -o pipefail\n          chmod +x gradlew ci/run-packaged-forge-smoke.sh ci/validate-packaged-jar.py\n          ./gradlew --no-daemon clean test jarJar 2>&1 | tee ci/shader-build-${{ matrix.pack }}.log\n          python3 ci/validate-packaged-jar.py "$(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print -quit)"\n\n      - name: Run installed client with ${{ matrix.pack }}\n        shell: bash\n        env:\n          VOXY_SMOKE_SHADER_PACK_DIR: ${{ github.workspace }}/ci/runtime-shader\n          VOXY_SMOKE_SHADER_PACK_NAME: ${{ matrix.folder }}\n          JAVA_TOOL_OPTIONS: >-\n            -Dmixin.env.remapRefMap=true\n            -Dmixin.env.refMapRemappingFile=${{ github.workspace }}/build/packaged-smoke-client-project/build/createSrgToMcp/output.srg\n            -Dembeddium.enableGameTest=false\n            -Dembeddium.runAutomatedTests=false\n        run: bash ci/run-packaged-forge-smoke.sh\n\n      - name: Require shader runtime contract\n        shell: bash\n        run: |\n          test -s ci/packaged-runtime-smoke/SUCCESS\n          grep -Fq "Using shaderpack: ${{ matrix.folder }}" ci/packaged-runtime-smoke/packaged-world-write.log\n          grep -Fq "using pipeline 'IrisVoxyRenderPipeline'" ci/packaged-runtime-smoke/packaged-world-write.log\n          grep -Fq 'External opaque Voxy shader patch applied' ci/packaged-runtime-smoke/packaged-world-write.log\n\n      - name: Upload certified jar and evidence\n        if: always()\n        uses: actions/upload-artifact@v7\n        with:\n          name: voxy-forge-1.19.2-${{ matrix.pack }}-${{ github.sha }}\n          retention-days: 14\n          if-no-files-found: warn\n          include-hidden-files: true\n          path: |\n            build/libs/*-all.jar\n            ci/shader-build-${{ matrix.pack }}.log\n            ci/packaged-runtime-smoke/\n            run-packaged-client/logs/\n            run-packaged-client/crash-reports/\n            run-packaged-client/voxy-smoke-*.json\n            run-packaged-client/.voxy/\n''')
+          PY
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ci/run-packaged-forge-smoke.sh .github/workflows/forge-1.19.2-shader-smoke.yml
+          git commit -m 'test: validate Oculus with Photon and Complementary [skip ci]'
+          git push origin HEAD:forge-1.19.2-shaders
