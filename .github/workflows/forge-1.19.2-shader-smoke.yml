@@ -1,0 +1,118 @@
+name: Forge 1.19.2 Oculus shader validation
+
+on:
+  push:
+    branches:
+      - forge-1.19.2-shaders
+    paths:
+      - 'build.gradle'
+      - 'gradle.properties'
+      - 'src/**'
+      - 'ci/run-packaged-forge-smoke.sh'
+      - 'ci/validate-packaged-jar.py'
+      - '.github/workflows/forge-1.19.2-shader-smoke.yml'
+  pull_request:
+    branches:
+      - forge-1.19.2
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: forge-1.19.2-shader-${{ matrix.pack }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shader-pack:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pack: photon
+            repository: sixthsurge/photon
+            ref: 15458c0937f8647c37eb6a501bef5eb3bf3da31b
+            folder: Photon-Voxy
+          - pack: complementary-reimagined
+            repository: ComplementaryDevelopment/ComplementaryReimagined
+            ref: 7c784f3a3bfe5a997f1393ea036e4e2d9789f1be
+            folder: ComplementaryReimagined-Voxy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      MESA_GLSL_VERSION_OVERRIDE: '460'
+
+    steps:
+      - name: Check out Voxy
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check out shader pack
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.repository }}
+          ref: ${{ matrix.ref }}
+          path: ci/runtime-shader
+          persist-credentials: false
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Install software OpenGL
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+            xvfb xauth mesa-utils libgl1-mesa-dri libglx-mesa0 flite1-dev
+
+      - name: Build production artifact
+        shell: bash
+        run: |
+          set -o pipefail
+          chmod +x gradlew ci/run-packaged-forge-smoke.sh ci/validate-packaged-jar.py
+          ./gradlew --no-daemon clean test jarJar 2>&1 | tee "ci/shader-build-${{ matrix.pack }}.log"
+          python3 ci/validate-packaged-jar.py "$(find build/libs -maxdepth 1 -type f -name '*-all.jar' -print -quit)"
+
+      - name: Run installed client with shader pack
+        shell: bash
+        env:
+          VOXY_SMOKE_SHADER_PACK_DIR: ${{ github.workspace }}/ci/runtime-shader
+          VOXY_SMOKE_SHADER_PACK_NAME: ${{ matrix.folder }}
+          JAVA_TOOL_OPTIONS: >-
+            -Dmixin.env.remapRefMap=true
+            -Dmixin.env.refMapRemappingFile=${{ github.workspace }}/build/packaged-smoke-client-project/build/createSrgToMcp/output.srg
+            -Dembeddium.enableGameTest=false
+            -Dembeddium.runAutomatedTests=false
+        run: bash ci/run-packaged-forge-smoke.sh
+
+      - name: Require shader runtime contract
+        shell: bash
+        run: |
+          test -s ci/packaged-runtime-smoke/SUCCESS
+          grep -Fq "Using shaderpack: ${{ matrix.folder }}" ci/packaged-runtime-smoke/packaged-world-write.log
+          grep -Fq "using pipeline 'IrisVoxyRenderPipeline'" ci/packaged-runtime-smoke/packaged-world-write.log
+          grep -Fq 'External opaque Voxy shader patch applied' ci/packaged-runtime-smoke/packaged-world-write.log
+
+      - name: Upload certified jar and evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: voxy-forge-1.19.2-${{ matrix.pack }}-${{ github.sha }}
+          retention-days: 14
+          if-no-files-found: warn
+          include-hidden-files: true
+          path: |
+            build/libs/*-all.jar
+            ci/shader-build-${{ matrix.pack }}.log
+            ci/packaged-runtime-smoke/
+            run-packaged-client/logs/
+            run-packaged-client/crash-reports/
+            run-packaged-client/voxy-smoke-*.json
+            run-packaged-client/.voxy/
